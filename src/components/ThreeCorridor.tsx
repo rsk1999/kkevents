@@ -54,8 +54,15 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   const targetMouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const isDraggingRef = useRef<boolean>(false);
   const dragStartYRef = useRef<number>(0);
+  const dragStartXRef = useRef<number>(0);
   const hoveredMeshRef = useRef<THREE.Group | null>(null);
   const needsRaycastRef = useRef<boolean>(true);
+
+  // Look Around (Yaw & Pitch) References
+  const lookYawRef = useRef<number>(0);
+  const targetYawRef = useRef<number>(0);
+  const lookPitchRef = useRef<number>(0);
+  const targetPitchRef = useRef<number>(0);
 
   // Prop Callbacks in Refs
   const onProgressChangeRef = useRef(onProgressChange);
@@ -519,11 +526,22 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       targetMouseRef.current.copy(mouseNorm);
       needsRaycastRef.current = true;
 
-      // Drag to walk along the curved spline
+      // Drag to walk along curved spline & look around
       if (isDraggingRef.current && !activeProjectRef.current) {
         const deltaDragY = e.clientY - dragStartYRef.current;
+        const deltaDragX = e.clientX - dragStartXRef.current;
         dragStartYRef.current = e.clientY;
+        dragStartXRef.current = e.clientX;
+
+        // Up/down: Walk
         velocityURef.current += deltaDragY * 0.00032;
+
+        // Left/right: Look around
+        targetYawRef.current -= deltaDragX * 0.0035;
+        targetYawRef.current = Math.max(-1.3, Math.min(1.3, targetYawRef.current));
+      } else if (!isDraggingRef.current && !activeProjectRef.current) {
+        // Natural mouse look around while hovering
+        targetPitchRef.current = mouseNorm.y * 0.28;
       }
     };
 
@@ -531,6 +549,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       if (activeProjectRef.current) return;
       isDraggingRef.current = true;
       dragStartYRef.current = e.clientY;
+      dragStartXRef.current = e.clientX;
     };
 
     const onMouseUp = () => {
@@ -574,20 +593,36 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
         velocityURef.current += 0.0028;
       } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === 'PageUp') {
         velocityURef.current -= 0.0028;
+      } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+        targetYawRef.current = Math.min(1.2, targetYawRef.current + 0.18);
+      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+        targetYawRef.current = Math.max(-1.2, targetYawRef.current - 0.18);
       }
     };
 
     let touchStartY = 0;
+    let touchStartX = 0;
     const onTouchStart = (e: TouchEvent) => {
-      touchStartY = e.touches[0].clientY;
+      if (e.touches.length > 0) {
+        touchStartY = e.touches[0].clientY;
+        touchStartX = e.touches[0].clientX;
+      }
     };
     const onTouchMove = (e: TouchEvent) => {
-      if (activeProjectRef.current) return;
+      if (activeProjectRef.current || e.touches.length === 0) return;
       const touchY = e.touches[0].clientY;
+      const touchX = e.touches[0].clientX;
       const deltaY = touchStartY - touchY;
+      const deltaX = touchStartX - touchX;
       touchStartY = touchY;
+      touchStartX = touchX;
 
-      velocityURef.current += deltaY * 0.00022;
+      // Vertical swipe: Walk along the curved spline
+      velocityURef.current += deltaY * 0.00024;
+
+      // Horizontal swipe: Look around left/right
+      targetYawRef.current += deltaX * 0.0045;
+      targetYawRef.current = Math.max(-1.3, Math.min(1.3, targetYawRef.current));
     };
 
     window.addEventListener('wheel', onWheel, { passive: false });
@@ -646,6 +681,16 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       mousePosRef.current.x += (targetMouseRef.current.x - mousePosRef.current.x) * mouseFactor;
       mousePosRef.current.y += (targetMouseRef.current.y - mousePosRef.current.y) * mouseFactor;
 
+      // Look-around Smoothing (Yaw & Pitch)
+      const lookFactor = 1.0 - Math.exp(-6.5 * delta);
+      lookYawRef.current += (targetYawRef.current - lookYawRef.current) * lookFactor;
+      lookPitchRef.current += (targetPitchRef.current - lookPitchRef.current) * lookFactor;
+
+      // When user is not dragging, gently decay yaw toward center so view realigns with corridor curve
+      if (!isDraggingRef.current && !activeProjectRef.current) {
+        targetYawRef.current *= Math.pow(0.97, delta * 60);
+      }
+
       // Check Lounge Transition
       if (currentURef.current >= CURVED_CONFIG.loungeU && !isInLoungeRef.current) {
         onEnterLoungeRef.current();
@@ -667,13 +712,21 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       camera.position.copy(camPos);
 
       // Natural Look-Ahead along the curve bend
-      // Look forward along the curve tangent by ~0.055 of curve length
+      // Sample slightly forward on the curve to determine forward direction vector
       const lookAheadU = Math.min(0.9999, currentURef.current + 0.055);
       const lookFrame = getPathFrame(lookAheadU);
-      const lookTarget = lookFrame.point.clone().add(new THREE.Vector3(0, CURVED_CONFIG.eyeHeight, 0));
-      // Apply subtle mouse look offset
-      lookTarget.add(curFrame.normal.clone().multiplyScalar(mousePosRef.current.x * 0.7));
-      lookTarget.y += mousePosRef.current.y * 0.35;
+      const forwardDir = lookFrame.point.clone().sub(curFrame.point).normalize();
+
+      // Combined Look Angles: User Look Swipe/Drag + Parallax
+      const combinedYaw = lookYawRef.current + mousePosRef.current.x * 0.35;
+      const combinedPitch = lookPitchRef.current + mousePosRef.current.y * 0.22;
+
+      // Rotate forward look direction around world Y by combined yaw
+      const rotatedLookDir = forwardDir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), combinedYaw);
+
+      // Calculate look target ahead of camera
+      const lookTarget = camPos.clone().add(rotatedLookDir.multiplyScalar(4.5));
+      lookTarget.y += combinedPitch * 1.5;
       camera.lookAt(lookTarget);
 
       // Floating dust particles animation

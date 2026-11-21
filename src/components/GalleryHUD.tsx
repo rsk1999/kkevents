@@ -1,6 +1,7 @@
 import React from 'react';
 import { Menu, Volume2, VolumeX, ArrowUpRight, ChevronLeft, ChevronRight, Compass, Play, Pause } from 'lucide-react';
 import type { Project } from '../types';
+import { InteractionHint } from './InteractionHint';
 
 interface GalleryHUDProps {
   currentProgress: number;
@@ -144,6 +145,13 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
               Click to inspect {hoveredProject.title} →
             </span>
           </div>
+        </div>
+      )}
+
+      {/* DUAL-AXIS INTERACTION GUIDE (Walk & Look Around) */}
+      {!isInLounge && !hoveredProject && (
+        <div className="pointer-events-none self-center mb-4 transition-all">
+          <InteractionHint />
         </div>
       )}
 
