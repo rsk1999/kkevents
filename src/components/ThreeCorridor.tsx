@@ -21,7 +21,9 @@ import {
 interface ThreeCorridorProps {
   currentProgress: number; // 0.0 to 1.0 along the curved spline
   onProgressChange: (u: number) => void;
-  onSelectProject: (project: Project) => void;
+  onFrameTap: (project: Project) => void;
+  onBackgroundTap: () => void;
+  selectedProjectId: string | null;
   activeProject: Project | null;
   isInLounge: boolean;
   onEnterLounge: () => void;
@@ -33,10 +35,13 @@ interface ThreeCorridorProps {
 export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   currentProgress,
   onProgressChange,
-  onSelectProject,
+  onFrameTap,
+  onBackgroundTap,
+  selectedProjectId,
   activeProject,
   isInLounge,
   onEnterLounge,
+  hoveredProjectId,
   onHoverProject,
   isAutoTouring = false
 }) => {
@@ -63,13 +68,20 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   const targetYawRef = useRef<number>(0);
   const lookPitchRef = useRef<number>(0);
   const targetPitchRef = useRef<number>(0);
+  const currentLookFocusRef = useRef<THREE.Vector3 | null>(null);
 
   // Prop Callbacks in Refs
   const onProgressChangeRef = useRef(onProgressChange);
   onProgressChangeRef.current = onProgressChange;
 
-  const onSelectProjectRef = useRef(onSelectProject);
-  onSelectProjectRef.current = onSelectProject;
+  const onFrameTapRef = useRef(onFrameTap);
+  onFrameTapRef.current = onFrameTap;
+
+  const onBackgroundTapRef = useRef(onBackgroundTap);
+  onBackgroundTapRef.current = onBackgroundTap;
+
+  const selectedProjectIdRef = useRef(selectedProjectId);
+  selectedProjectIdRef.current = selectedProjectId;
 
   const onEnterLoungeRef = useRef(onEnterLounge);
   onEnterLoungeRef.current = onEnterLounge;
@@ -400,6 +412,18 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     // --- 8. ARTWORK EXHIBITS MOUNTED FLUSH TO THE CURVED WALLS ---
     const interactiveMeshes: THREE.Mesh[] = [];
     const textureLoader = new THREE.TextureLoader();
+    const projectMap = new Map<
+      string,
+      {
+        group: THREE.Group;
+        frameMesh: THREE.Mesh;
+        frameMat: THREE.MeshStandardMaterial;
+        spotLight: THREE.SpotLight;
+        originalPos: THREE.Vector3;
+        normal: THREE.Vector3;
+        project: Project;
+      }
+    >();
 
     EXHIBITION_PROJECTS.forEach((project) => {
       // Calculate exact 3D position and orientation matching the curve
@@ -422,7 +446,9 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       const frameMat = new THREE.MeshStandardMaterial({
         color: '#B89A6A',
         metalness: 0.88,
-        roughness: 0.22
+        roughness: 0.22,
+        emissive: new THREE.Color('#000000'),
+        emissiveIntensity: 0
       });
       const frameMesh = new THREE.Mesh(frameGeo, frameMat);
       group.add(frameMesh);
@@ -513,11 +539,24 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       scene.add(fixture);
 
       scene.add(group);
+
+      projectMap.set(project.id, {
+        group,
+        frameMesh,
+        frameMat,
+        spotLight,
+        originalPos: position.clone(),
+        normal: normal.clone(),
+        project
+      });
     });
 
-    // --- 9. RAYCASTER & INTERACTION ---
+    // --- 9. RAYCASTER & INTERACTION SYSTEM WITH GESTURE SAFETY ---
     const raycaster = new THREE.Raycaster();
     const mouseNorm = new THREE.Vector2();
+
+    let pointerDownTime = 0;
+    let pointerTotalDrag = 0;
 
     const onPointerMove = (e: MouseEvent) => {
       mouseNorm.x = (e.clientX / window.innerWidth) * 2 - 1;
@@ -532,14 +571,17 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
         const deltaDragX = e.clientX - dragStartXRef.current;
         dragStartYRef.current = e.clientY;
         dragStartXRef.current = e.clientX;
+        pointerTotalDrag += Math.hypot(deltaDragX, deltaDragY);
 
-        // Up/down: Walk
-        velocityURef.current += deltaDragY * 0.00032;
+        // Walking along corridor is paused while a frame preview is active
+        if (!selectedProjectIdRef.current) {
+          velocityURef.current += deltaDragY * 0.00032;
+        }
 
         // Left/right: Look around
         targetYawRef.current -= deltaDragX * 0.0035;
         targetYawRef.current = Math.max(-1.3, Math.min(1.3, targetYawRef.current));
-      } else if (!isDraggingRef.current && !activeProjectRef.current) {
+      } else if (!isDraggingRef.current && !activeProjectRef.current && !selectedProjectIdRef.current) {
         // Natural mouse look around while hovering
         targetPitchRef.current = mouseNorm.y * 0.28;
       }
@@ -550,22 +592,35 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       isDraggingRef.current = true;
       dragStartYRef.current = e.clientY;
       dragStartXRef.current = e.clientX;
+      pointerDownTime = performance.now();
+      pointerTotalDrag = 0;
     };
 
-    const onMouseUp = () => {
-      isDraggingRef.current = false;
-    };
-
-    const onClick = (e: MouseEvent) => {
-      mouseNorm.x = (e.clientX / window.innerWidth) * 2 - 1;
-      mouseNorm.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    const executeDeliberateTap = (clientX: number, clientY: number) => {
+      mouseNorm.x = (clientX / window.innerWidth) * 2 - 1;
+      mouseNorm.y = -(clientY / window.innerHeight) * 2 + 1;
       raycaster.setFromCamera(mouseNorm, camera);
 
       const intersects = raycaster.intersectObjects(interactiveMeshes);
       if (intersects.length > 0) {
         const hit = intersects[0].object;
         if (hit.userData && hit.userData.project) {
-          onSelectProjectRef.current(hit.userData.project);
+          onFrameTapRef.current(hit.userData.project);
+          return;
+        }
+      }
+
+      // If user tapped empty space or wall
+      onBackgroundTapRef.current();
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+        const duration = performance.now() - pointerDownTime;
+        // Deliberate tap check: minimal movement (< 7px) and short duration (< 350ms)
+        if (pointerTotalDrag < 7 && duration < 350) {
+          executeDeliberateTap(e.clientX, e.clientY);
         }
       }
     };
@@ -573,11 +628,10 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     window.addEventListener('mousemove', onPointerMove, { passive: true });
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
-    window.addEventListener('click', onClick);
 
     // --- 10. FLUID INERTIA MOMENTUM SCROLL ENGINE ALONG SPLINE ---
     const onWheel = (e: WheelEvent) => {
-      if (activeProjectRef.current) return;
+      if (activeProjectRef.current || selectedProjectIdRef.current) return;
       e.preventDefault();
 
       const rawDelta = e.deltaY;
@@ -589,6 +643,12 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (activeProjectRef.current) return;
+      if (e.key === 'Escape') {
+        onBackgroundTapRef.current();
+        return;
+      }
+      if (selectedProjectIdRef.current) return; // Walking paused while frame is selected
+
       if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S' || e.key === 'PageDown') {
         velocityURef.current += 0.0028;
       } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === 'PageUp') {
@@ -602,33 +662,51 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
     let touchStartY = 0;
     let touchStartX = 0;
+    let touchStartTime = 0;
+    let touchTotalDist = 0;
+
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length > 0) {
         touchStartY = e.touches[0].clientY;
         touchStartX = e.touches[0].clientX;
+        touchStartTime = performance.now();
+        touchTotalDist = 0;
       }
     };
+
     const onTouchMove = (e: TouchEvent) => {
       if (activeProjectRef.current || e.touches.length === 0) return;
       const touchY = e.touches[0].clientY;
       const touchX = e.touches[0].clientX;
       const deltaY = touchStartY - touchY;
       const deltaX = touchStartX - touchX;
+      touchTotalDist += Math.hypot(deltaX, deltaY);
       touchStartY = touchY;
       touchStartX = touchX;
 
-      // Vertical swipe: Walk along the curved spline
-      velocityURef.current += deltaY * 0.00024;
+      // Vertical swipe: Walk along the curved spline (only when no frame is selected)
+      if (!selectedProjectIdRef.current) {
+        velocityURef.current += deltaY * 0.00024;
+      }
 
       // Horizontal swipe: Look around left/right
       targetYawRef.current += deltaX * 0.0045;
       targetYawRef.current = Math.max(-1.3, Math.min(1.3, targetYawRef.current));
     };
 
+    const onTouchEnd = () => {
+      const touchDuration = performance.now() - touchStartTime;
+      // ONLY trigger tap if user touched cleanly without swiping (< 8px movement and < 350ms)
+      if (touchTotalDist < 8 && touchDuration < 350) {
+        executeDeliberateTap(touchStartX, touchStartY);
+      }
+    };
+
     window.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('touchstart', onTouchStart, { passive: true });
     window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
 
     const onResize = () => {
       camera.aspect = window.innerWidth / window.innerHeight;
@@ -724,10 +802,30 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       // Rotate forward look direction around world Y by combined yaw
       const rotatedLookDir = forwardDir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), combinedYaw);
 
-      // Calculate look target ahead of camera
-      const lookTarget = camPos.clone().add(rotatedLookDir.multiplyScalar(4.5));
-      lookTarget.y += combinedPitch * 1.5;
-      camera.lookAt(lookTarget);
+      // Calculate normal look target ahead of camera along the curve bend
+      const defaultLookTarget = camPos.clone().add(rotatedLookDir.multiplyScalar(4.5));
+      defaultLookTarget.y += combinedPitch * 1.5;
+
+      if (!currentLookFocusRef.current) {
+        currentLookFocusRef.current = defaultLookTarget.clone();
+      }
+
+      if (selectedProjectIdRef.current) {
+        const selEntry = projectMap.get(selectedProjectIdRef.current);
+        if (selEntry) {
+          // Frame target centered at the artwork
+          const frameTarget = selEntry.originalPos.clone();
+          frameTarget.y = CURVED_CONFIG.eyeHeight * 0.98;
+          // Smooth focus toward the selected frame
+          currentLookFocusRef.current.lerp(frameTarget, 1.0 - Math.exp(-6.0 * delta));
+          camera.lookAt(currentLookFocusRef.current);
+        } else {
+          camera.lookAt(defaultLookTarget);
+        }
+      } else {
+        currentLookFocusRef.current.lerp(defaultLookTarget, 1.0 - Math.exp(-7.0 * delta));
+        camera.lookAt(currentLookFocusRef.current);
+      }
 
       // Floating dust particles animation
       const pPositions = particleGeo.attributes.position.array as Float32Array;
@@ -762,13 +860,39 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
         }
       }
 
-      // Smooth hover frame elevation along local normal vector
-      if (hoveredMeshRef.current && hoveredMeshRef.current.userData.originalPos !== undefined) {
-        const orig = hoveredMeshRef.current.userData.originalPos as THREE.Vector3;
-        const norm = hoveredMeshRef.current.userData.normal as THREE.Vector3;
-        const targetLift = orig.clone().add(norm.clone().multiplyScalar(0.18));
-        hoveredMeshRef.current.position.lerp(targetLift, 0.15);
-      }
+      // Smooth frame state transitions: NORMAL vs HOVER vs SELECTED
+      projectMap.forEach(({ group, originalPos, normal, frameMat, spotLight }, pid) => {
+        let targetPos = originalPos;
+        let targetScale = 1.0;
+
+        if (pid === selectedProjectIdRef.current) {
+          // SELECTED: Move forward from the wall, slightly enlarge, intensify spotlight & frame glow
+          targetPos = originalPos.clone().add(normal.clone().multiplyScalar(0.22));
+          targetScale = 1.045;
+          frameMat.emissive.set('#B89A6A');
+          frameMat.emissiveIntensity = 0.35;
+          spotLight.intensity = 4.2;
+        } else if (pid === hoveredProjectId && !selectedProjectIdRef.current) {
+          // HOVER: Subtle desktop hover lift
+          targetPos = originalPos.clone().add(normal.clone().multiplyScalar(0.06));
+          targetScale = 1.01;
+          frameMat.emissive.set('#000000');
+          frameMat.emissiveIntensity = 0;
+          spotLight.intensity = 3.4;
+        } else {
+          // NORMAL: Resting on wall
+          targetPos = originalPos;
+          targetScale = 1.0;
+          frameMat.emissive.set('#000000');
+          frameMat.emissiveIntensity = 0;
+          spotLight.intensity = 2.8;
+        }
+
+        group.position.lerp(targetPos, 1.0 - Math.exp(-8.0 * delta));
+        const curScale = group.scale.x;
+        const newScale = curScale + (targetScale - curScale) * (1.0 - Math.exp(-8.0 * delta));
+        group.scale.set(newScale, newScale, newScale);
+      });
 
       renderer.render(scene, camera);
     };
@@ -780,11 +904,11 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       window.removeEventListener('mousemove', onPointerMove);
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
-      window.removeEventListener('click', onClick);
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
       window.removeEventListener('resize', onResize);
 
       if (container && renderer.domElement) {

@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { ThreeCorridor } from './components/ThreeCorridor';
 import { EntranceScreen } from './components/EntranceScreen';
 import { ProjectDetailModal } from './components/ProjectDetailModal';
+import { ProjectPreviewPanel } from './components/ProjectPreviewPanel';
 import { BookingLoungeOverlay } from './components/BookingLoungeOverlay';
 import { GalleryHUD } from './components/GalleryHUD';
 import { GalleryIndexDrawer } from './components/GalleryIndexDrawer';
@@ -14,6 +15,10 @@ export const App: React.FC = () => {
   // Spline Progress u: 0.04 (entrance) to 0.96 (booking lounge)
   const [currentProgress, setCurrentProgress] = useState(0.04);
   const [savedReturnProgress, setSavedReturnProgress] = useState(0.04);
+  // Two-Step Interaction States:
+  // Step 1: Selected Frame (preview panel open, frame highlighted, camera focused)
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  // Step 2: Open Project Modal (full case study view)
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [isInLounge, setIsInLounge] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -32,29 +37,59 @@ export const App: React.FC = () => {
     setCurrentProgress(0.07);
   }, []);
 
-  // Open Project Details (Scene 03)
-  const handleSelectProject = useCallback((project: Project) => {
+  // STEP 1 & STEP 2 INTENTIONAL TAP HANDLER:
+  // First tap selects frame and shows preview.
+  // Second tap on the same selected frame opens the full project!
+  const handleFrameTap = useCallback((project: Project) => {
+    if (selectedProject?.id === project.id) {
+      // Step 2: Second intentional tap on already-selected frame -> Open full project modal!
+      setSavedReturnProgress(currentProgress);
+      setActiveProject(project);
+      setSelectedProject(null);
+    } else {
+      // Step 1: First intentional tap -> Select frame & display preview
+      setSelectedProject(project);
+    }
+  }, [selectedProject, currentProgress]);
+
+  // Tap on background / empty corridor space -> Deselect & close preview
+  const handleBackgroundTap = useCallback(() => {
+    if (selectedProject) {
+      setSelectedProject(null);
+    }
+  }, [selectedProject]);
+
+  // STEP 2 ALTERNATIVE: Tap "VIEW PROJECT" inside Preview Panel
+  const handleViewProjectFromPreview = useCallback((project: Project) => {
     setSavedReturnProgress(currentProgress);
     setActiveProject(project);
+    setSelectedProject(null);
   }, [currentProgress]);
 
-  // Return to exact location on curved spline
+  // Close preview panel
+  const handleClosePreview = useCallback(() => {
+    setSelectedProject(null);
+  }, []);
+
+  // Return to exact location on curved spline when closing full modal
   const handleCloseProject = useCallback(() => {
     setActiveProject(null);
+    setSelectedProject(null);
     setCurrentProgress(savedReturnProgress);
   }, [savedReturnProgress]);
 
   // Jump from project page directly to booking room
   const handlePlanFromProject = useCallback(() => {
     setActiveProject(null);
+    setSelectedProject(null);
     setCurrentProgress(0.95);
     setIsInLounge(true);
   }, []);
 
   // Jump directly to a project from Menu Directory along the curve
   const handleJumpToProject = useCallback((project: Project) => {
-    // Position camera slightly ahead of the artwork on the curve
     setCurrentProgress(Math.max(0.04, project.pathU - 0.03));
+    setSelectedProject(project); // Select the frame when navigated from directory
     setIsInLounge(false);
   }, []);
 
@@ -89,10 +124,6 @@ export const App: React.FC = () => {
     });
     return closest;
   }, [currentProgress]);
-
-  const hoveredProject = useMemo(() => {
-    return EXHIBITION_PROJECTS.find((p) => p.id === hoveredProjectId) || null;
-  }, [hoveredProjectId]);
 
   // Stepper navigation along the curved spline
   const handleNavigateNext = useCallback(() => {
@@ -132,7 +163,9 @@ export const App: React.FC = () => {
       <ThreeCorridor
         currentProgress={currentProgress}
         onProgressChange={setCurrentProgress}
-        onSelectProject={handleSelectProject}
+        onFrameTap={handleFrameTap}
+        onBackgroundTap={handleBackgroundTap}
+        selectedProjectId={selectedProject?.id ?? null}
         activeProject={activeProject}
         isInLounge={isInLounge}
         onEnterLounge={handleEnterLounge}
@@ -141,14 +174,23 @@ export const App: React.FC = () => {
         isAutoTouring={isAutoTouring}
       />
 
-      {/* 3. SCENE 04: THE BOOKING LOUNGE OVERLAY (When in Lounge) */}
+      {/* 3. STEP 1: PREVIEW PANEL (When a frame is selected, before full modal) */}
+      {selectedProject && !activeProject && !isInLounge && (
+        <ProjectPreviewPanel
+          project={selectedProject}
+          onViewProject={handleViewProjectFromPreview}
+          onClose={handleClosePreview}
+        />
+      )}
+
+      {/* 4. SCENE 04: THE BOOKING LOUNGE OVERLAY (When in Lounge) */}
       {isInLounge && hasEntered && !activeProject && (
         <div className="fixed inset-0 z-40 overflow-y-auto bg-[#F3F0E9]/90 backdrop-blur-md transition-all duration-700 animate-fadeIn">
           <BookingLoungeOverlay onBackToCorridor={handleBackToCorridorFromLounge} />
         </div>
       )}
 
-      {/* 4. SCENE 03: PROJECT DETAIL VIEW MODAL */}
+      {/* 5. SCENE 03: PROJECT DETAIL VIEW MODAL (Step 2: Full View) */}
       {activeProject && (
         <ProjectDetailModal
           project={activeProject}
@@ -157,16 +199,16 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* 5. HUD CONTROLS & NAVIGATION */}
+      {/* 6. HUD CONTROLS & NAVIGATION */}
       {hasEntered && !activeProject && (
         <GalleryHUD
           currentProgress={currentProgress}
           nearestProject={nearestProject}
+          selectedProject={selectedProject}
           onOpenMenu={() => setIsMenuOpen(true)}
           onJumpToBooking={handleJumpToBooking}
           onNavigateNext={handleNavigateNext}
           onNavigatePrev={handleNavigatePrev}
-          hoveredProject={hoveredProject}
           isInLounge={isInLounge}
           isAutoTouring={isAutoTouring}
           onToggleAutoTour={() => setIsAutoTouring(!isAutoTouring)}

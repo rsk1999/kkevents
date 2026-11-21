@@ -6,11 +6,11 @@ import { InteractionHint } from './InteractionHint';
 interface GalleryHUDProps {
   currentProgress: number;
   nearestProject: Project | null;
+  selectedProject?: Project | null;
   onOpenMenu: () => void;
   onJumpToBooking: () => void;
   onNavigateNext: () => void;
   onNavigatePrev: () => void;
-  hoveredProject: Project | null;
   isInLounge: boolean;
   isAutoTouring: boolean;
   onToggleAutoTour: () => void;
@@ -19,11 +19,11 @@ interface GalleryHUDProps {
 export const GalleryHUD: React.FC<GalleryHUDProps> = ({
   currentProgress,
   nearestProject,
+  selectedProject,
   onOpenMenu,
   onJumpToBooking,
   onNavigateNext,
   onNavigatePrev,
-  hoveredProject,
   isInLounge,
   isAutoTouring,
   onToggleAutoTour
@@ -53,6 +53,16 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
             <span className="font-display text-xs tracking-[0.2em] text-[#8C6D3F] font-semibold uppercase">
               ✦ The Booking Lounge
             </span>
+          ) : selectedProject ? (
+            <div className="flex items-center space-x-2">
+              <span className="font-display text-xs tracking-wider text-[#B89A6A] font-bold">
+                {selectedProject.number} / 08
+              </span>
+              <span className="text-[#222222]/30">·</span>
+              <span className="font-serif text-sm text-[#222222] font-semibold truncate max-w-[240px]">
+                ✦ {selectedProject.title}
+              </span>
+            </div>
           ) : nearestProject ? (
             <div className="flex items-center space-x-2">
               <span className="font-display text-xs tracking-wider text-[#B89A6A] font-bold">
@@ -115,24 +125,8 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
         </div>
       </div>
 
-      {/* CENTER HOVER PROMPT (Appears when user points mouse at any frame) */}
-      {hoveredProject && (
-        <div className="pointer-events-auto self-center my-auto transition-all transform animate-fadeIn">
-          <div className="bg-[#222222]/90 text-white backdrop-blur-lg px-6 py-3 rounded-full border border-[#B89A6A] shadow-2xl flex items-center space-x-3 cursor-pointer">
-            <span className="w-2 h-2 rounded-full bg-[#B89A6A] animate-ping" />
-            <span className="font-display text-xs tracking-[0.25em] text-[#B89A6A] uppercase font-bold">
-              {hoveredProject.number} · {hoveredProject.category}
-            </span>
-            <span className="text-white/40">|</span>
-            <span className="font-serif text-sm tracking-wide">
-              Click to inspect {hoveredProject.title} →
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* DUAL-AXIS INTERACTION GUIDE (Walk & Look Around) */}
-      {!isInLounge && !hoveredProject && (
+      {!isInLounge && !selectedProject && (
         <div className="pointer-events-none self-center mb-4 transition-all">
           <InteractionHint />
         </div>
