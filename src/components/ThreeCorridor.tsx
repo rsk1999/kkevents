@@ -54,8 +54,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   const lastReportedURef = useRef<number>(currentProgress);
   const lastReportTimeRef = useRef<number>(0);
 
-  // Mouse Parallax & Interaction References
-  const mousePosRef = useRef<THREE.Vector2>(new THREE.Vector2());
+  // Mouse Interaction References
   const targetMouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const isDraggingRef = useRef<boolean>(false);
   const dragStartYRef = useRef<number>(0);
@@ -551,49 +550,51 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       });
     });
 
-    // --- 9. RAYCASTER & INTERACTION SYSTEM WITH GESTURE SAFETY ---
+    // --- 9. RAYCASTER & CLICK-AND-DRAG CAMERA CONTROLS (NO PASSIVE MOUSE LOOK) ---
     const raycaster = new THREE.Raycaster();
     const mouseNorm = new THREE.Vector2();
 
     let pointerDownTime = 0;
     let pointerTotalDrag = 0;
 
-    const onPointerMove = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
       mouseNorm.x = (e.clientX / window.innerWidth) * 2 - 1;
       mouseNorm.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
       targetMouseRef.current.copy(mouseNorm);
       needsRaycastRef.current = true;
 
-      // Drag to walk along curved spline & look around
-      if (isDraggingRef.current && !activeProjectRef.current) {
-        const deltaDragY = e.clientY - dragStartYRef.current;
-        const deltaDragX = e.clientX - dragStartXRef.current;
-        dragStartYRef.current = e.clientY;
+      // CAMERA LOOK ACTIVATES ONLY ON ACTIVE LEFT-BUTTON CLICK & DRAG
+      if (isDraggingRef.current && !activeProjectRef.current && e.pointerType !== 'touch') {
+        const deltaX = e.clientX - dragStartXRef.current;
+        const deltaY = e.clientY - dragStartYRef.current;
         dragStartXRef.current = e.clientX;
-        pointerTotalDrag += Math.hypot(deltaDragX, deltaDragY);
+        dragStartYRef.current = e.clientY;
+        pointerTotalDrag += Math.hypot(deltaX, deltaY);
 
-        // Walking along corridor is paused while a frame preview is active
-        if (!selectedProjectIdRef.current) {
-          velocityURef.current += deltaDragY * 0.00032;
-        }
+        // Hold left mouse button + drag left = turn left; drag right = turn right
+        targetYawRef.current -= deltaX * 0.0032;
+        targetYawRef.current = Math.max(-1.35, Math.min(1.35, targetYawRef.current));
 
-        // Left/right: Look around
-        targetYawRef.current -= deltaDragX * 0.0035;
-        targetYawRef.current = Math.max(-1.3, Math.min(1.3, targetYawRef.current));
-      } else if (!isDraggingRef.current && !activeProjectRef.current && !selectedProjectIdRef.current) {
-        // Natural mouse look around while hovering
-        targetPitchRef.current = mouseNorm.y * 0.28;
+        // Hold left mouse button + drag up = look up; drag down = look down
+        targetPitchRef.current -= deltaY * 0.0016;
+        targetPitchRef.current = Math.max(-0.35, Math.min(0.35, targetPitchRef.current));
       }
+      // PASSIVE MOUSE MOVEMENT (WITHOUT HOLDING LEFT CLICK) DOES ABSOLUTELY NOTHING TO THE CAMERA.
     };
 
-    const onMouseDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       if (activeProjectRef.current) return;
-      isDraggingRef.current = true;
-      dragStartYRef.current = e.clientY;
-      dragStartXRef.current = e.clientX;
-      pointerDownTime = performance.now();
-      pointerTotalDrag = 0;
+      // ONLY respond to Left Mouse Button (button 0) for camera looking & frame interaction
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+      if (e.pointerType !== 'touch') {
+        isDraggingRef.current = true;
+        dragStartXRef.current = e.clientX;
+        dragStartYRef.current = e.clientY;
+        pointerDownTime = performance.now();
+        pointerTotalDrag = 0;
+      }
     };
 
     const executeDeliberateTap = (clientX: number, clientY: number) => {
@@ -614,20 +615,27 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       onBackgroundTapRef.current();
     };
 
-    const onMouseUp = (e: MouseEvent) => {
-      if (isDraggingRef.current) {
+    const onPointerUp = (e: PointerEvent) => {
+      if (isDraggingRef.current && e.pointerType !== 'touch') {
         isDraggingRef.current = false;
         const duration = performance.now() - pointerDownTime;
         // Deliberate tap check: minimal movement (< 7px) and short duration (< 350ms)
         if (pointerTotalDrag < 7 && duration < 350) {
           executeDeliberateTap(e.clientX, e.clientY);
         }
+        // When left mouse is released: camera look stops immediately and PRESERVES current view direction!
       }
     };
 
-    window.addEventListener('mousemove', onPointerMove, { passive: true });
-    window.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mouseup', onMouseUp);
+    const onPointerCancel = () => {
+      isDraggingRef.current = false;
+    };
+
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('pointerleave', onPointerCancel);
 
     // --- 10. FLUID INERTIA MOMENTUM SCROLL ENGINE ALONG SPLINE ---
     const onWheel = (e: WheelEvent) => {
@@ -676,22 +684,25 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
     const onTouchMove = (e: TouchEvent) => {
       if (activeProjectRef.current || e.touches.length === 0) return;
-      const touchY = e.touches[0].clientY;
       const touchX = e.touches[0].clientX;
-      const deltaY = touchStartY - touchY;
+      const touchY = e.touches[0].clientY;
       const deltaX = touchStartX - touchX;
+      const deltaY = touchStartY - touchY;
       touchTotalDist += Math.hypot(deltaX, deltaY);
-      touchStartY = touchY;
       touchStartX = touchX;
+      touchStartY = touchY;
 
-      // Vertical swipe: Walk along the curved spline (only when no frame is selected)
-      if (!selectedProjectIdRef.current) {
-        velocityURef.current += deltaY * 0.00024;
+      // Direction detection to distinguish walking from looking on mobile:
+      if (Math.abs(deltaY) > Math.abs(deltaX)) {
+        // Vertical swipe = Walk forward / backward along the curved corridor
+        if (!selectedProjectIdRef.current) {
+          velocityURef.current += deltaY * 0.00024;
+        }
+      } else {
+        // Horizontal swipe = Look left / right
+        targetYawRef.current += deltaX * 0.004;
+        targetYawRef.current = Math.max(-1.35, Math.min(1.35, targetYawRef.current));
       }
-
-      // Horizontal swipe: Look around left/right
-      targetYawRef.current += deltaX * 0.0045;
-      targetYawRef.current = Math.max(-1.3, Math.min(1.3, targetYawRef.current));
     };
 
     const onTouchEnd = () => {
@@ -754,20 +765,13 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       const lerpFactor = 1.0 - Math.exp(-9.0 * delta);
       currentURef.current += (targetURef.current - currentURef.current) * lerpFactor;
 
-      // Mouse Parallax Smooth Easing
-      const mouseFactor = 1.0 - Math.exp(-5.5 * delta);
-      mousePosRef.current.x += (targetMouseRef.current.x - mousePosRef.current.x) * mouseFactor;
-      mousePosRef.current.y += (targetMouseRef.current.y - mousePosRef.current.y) * mouseFactor;
-
-      // Look-around Smoothing (Yaw & Pitch)
-      const lookFactor = 1.0 - Math.exp(-6.5 * delta);
+      // Smooth camera look damping (yaw & pitch)
+      const lookFactor = 1.0 - Math.exp(-9.0 * delta);
       lookYawRef.current += (targetYawRef.current - lookYawRef.current) * lookFactor;
       lookPitchRef.current += (targetPitchRef.current - lookPitchRef.current) * lookFactor;
 
-      // When user is not dragging, gently decay yaw toward center so view realigns with corridor curve
-      if (!isDraggingRef.current && !activeProjectRef.current) {
-        targetYawRef.current *= Math.pow(0.97, delta * 60);
-      }
+      // Note: We DO NOT auto-decay yaw toward center on mouse release.
+      // The current viewing direction is strictly preserved where the user leaves it.
 
       // Check Lounge Transition
       if (currentURef.current >= CURVED_CONFIG.loungeU && !isInLoungeRef.current) {
@@ -783,28 +787,22 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       }
 
       // --- CALCULATE CAMERA POSITION & ORIENTATION ON CURVE ---
+      // Camera position on curved spline (no passive lateral mouse sway)
       const curFrame = getPathFrame(currentURef.current);
       const camPos = curFrame.point.clone().add(new THREE.Vector3(0, CURVED_CONFIG.eyeHeight, 0));
-      // Subtle lateral mouse sway
-      camPos.add(curFrame.normal.clone().multiplyScalar(mousePosRef.current.x * 0.14));
       camera.position.copy(camPos);
 
       // Natural Look-Ahead along the curve bend
-      // Sample slightly forward on the curve to determine forward direction vector
       const lookAheadU = Math.min(0.9999, currentURef.current + 0.055);
       const lookFrame = getPathFrame(lookAheadU);
       const forwardDir = lookFrame.point.clone().sub(curFrame.point).normalize();
 
-      // Combined Look Angles: User Look Swipe/Drag + Parallax
-      const combinedYaw = lookYawRef.current + mousePosRef.current.x * 0.35;
-      const combinedPitch = lookPitchRef.current + mousePosRef.current.y * 0.22;
-
-      // Rotate forward look direction around world Y by combined yaw
-      const rotatedLookDir = forwardDir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), combinedYaw);
+      // Rotate forward look direction around world Y strictly by active lookYawRef
+      const rotatedLookDir = forwardDir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), lookYawRef.current);
 
       // Calculate normal look target ahead of camera along the curve bend
       const defaultLookTarget = camPos.clone().add(rotatedLookDir.multiplyScalar(4.5));
-      defaultLookTarget.y += combinedPitch * 1.5;
+      defaultLookTarget.y += lookPitchRef.current * 2.2;
 
       if (!currentLookFocusRef.current) {
         currentLookFocusRef.current = defaultLookTarget.clone();
@@ -901,9 +899,11 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
     return () => {
       cancelAnimationFrame(animationId);
-      window.removeEventListener('mousemove', onPointerMove);
-      window.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('pointerleave', onPointerCancel);
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('touchstart', onTouchStart);

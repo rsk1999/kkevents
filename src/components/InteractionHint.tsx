@@ -76,7 +76,7 @@ export const InteractionHint: React.FC<InteractionHintProps> = ({ onDismiss }) =
 
       {/* Secondary Desktop Mouse Instruction */}
       <p className="text-[10px] text-[#8C8578] uppercase tracking-wider font-sans-clean mt-1 hidden sm:block">
-        Scroll / Drag to walk · Move mouse to look around
+        Scroll wheel to walk · Hold left click & drag to look around
       </p>
     </div>
   );

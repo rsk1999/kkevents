@@ -156,7 +156,7 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
         <div className="hidden lg:flex items-center space-x-2 text-xs font-sans-clean text-[#666666] bg-[#FAF8F5]/80 backdrop-blur-md px-4 py-2 rounded-full border border-[#B89A6A]/20">
           <Compass className="w-3.5 h-3.5 text-[#B89A6A] animate-spin" style={{ animationDuration: '8s' }} />
           <span className="uppercase tracking-widest text-[11px]">
-            Scroll mouse or drag to glide corridor · Click artwork to open
+            Scroll wheel to walk · Hold left click & drag to look around · Click artwork to select
           </span>
         </div>
 
