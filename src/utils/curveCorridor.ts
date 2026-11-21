@@ -1,19 +1,20 @@
 import * as THREE from 'three';
 
 /**
- * Mathematical S-Shaped Spline Architecture for KK Events
+ * Genuine Architectural S-Shaped Spline Architecture for KK Events
+ * Sweeping, grand, architectural curves with natural occlusion and progressive discovery.
  */
 
 export const CORRIDOR_CURVE_POINTS = [
-  new THREE.Vector3(0.0, 0, 16.0),   // P0: Entrance vestibule
-  new THREE.Vector3(0.0, 0, 6.0),    // P1: Straight entry path
-  new THREE.Vector3(-2.0, 0, -8.0),  // P2: Begins gradual left turn
-  new THREE.Vector3(-6.2, 0, -24.0), // P3: Sweeping elegant left curve
-  new THREE.Vector3(-6.8, 0, -38.0), // P4: Apex of left curve
-  new THREE.Vector3(-2.8, 0, -54.0), // P5: Gentle S-curve transition
-  new THREE.Vector3(3.8, 0, -70.0),  // P6: Sweeping gentle right curve
-  new THREE.Vector3(5.8, 0, -84.0),  // P7: Straightening toward lounge
-  new THREE.Vector3(5.0, 0, -98.0)   // P8: Grand Booking Lounge Center
+  new THREE.Vector3(0.0, 0, 16.0),    // P0: Entrance threshold
+  new THREE.Vector3(0.0, 0, 4.0),     // P1: Straight entry path
+  new THREE.Vector3(-4.0, 0, -14.0),  // P2: Elegant gradual left turn begins
+  new THREE.Vector3(-12.0, 0, -34.0), // P3: Wide sweeping left curve (occludes far corridor)
+  new THREE.Vector3(-14.2, 0, -52.0), // P4: Apex of left curve
+  new THREE.Vector3(-7.5, 0, -72.0),  // P5: Flowing S-curve inflection
+  new THREE.Vector3(4.5, 0, -92.0),   // P6: Sweeping gentle counter-curve to the right
+  new THREE.Vector3(9.5, 0, -110.0),  // P7: Straightening toward the lounge
+  new THREE.Vector3(8.5, 0, -126.0)   // P8: Grand Booking Lounge Pavilion Center
 ];
 
 export const corridorSpline = new THREE.CatmullRomCurve3(
@@ -24,14 +25,14 @@ export const corridorSpline = new THREE.CatmullRomCurve3(
 );
 
 export const CURVED_CONFIG = {
-  width: 9.2,
+  width: 8.8,
   height: 7.2,
   eyeHeight: 1.7,
-  samples: 220,
+  samples: 280,
   minU: 0.02,
   maxU: 0.97,
   loungeU: 0.92,
-  walkStartU: 0.06
+  walkStartU: 0.05
 };
 
 // Compute local orthonormal frame (T, U, N) at parameter u
@@ -67,13 +68,12 @@ export function createCurvedFloorGeometry(
     positions.push(left.x, 0, left.z);
     positions.push(right.x, 0, right.z);
 
-    const uvV = u * 24; // tile along length
+    const uvV = u * 28; // tile cleanly along length
     uvs.push(0, uvV);
     uvs.push(1, uvV);
 
     if (i < samples) {
       const idx = i * 2;
-      // Two triangles per segment
       indices.push(idx, idx + 2, idx + 1);
       indices.push(idx + 1, idx + 2, idx + 3);
     }
@@ -110,7 +110,7 @@ export function createCurvedCeilingGeometry(
     positions.push(left.x, height, left.z);
     positions.push(right.x, height, right.z);
 
-    const uvV = u * 24;
+    const uvV = u * 28;
     uvs.push(0, uvV);
     uvs.push(1, uvV);
 
@@ -154,7 +154,7 @@ export function createCurvedWallGeometry(
     positions.push(base.x, 0, base.z);       // bottom
     positions.push(base.x, height, base.z);  // top
 
-    const uvU = u * 20;
+    const uvU = u * 24;
     uvs.push(uvU, 0);
     uvs.push(uvU, 1);
 
@@ -178,7 +178,7 @@ export function createCurvedWallGeometry(
   return geometry;
 }
 
-// Generate curved ribbon strip (for baseboards, reveal lines, cove lighting, and rails)
+// Generate curved ribbon strip (baseboards, reveal lines, cove lighting, and rails)
 export function createCurvedRibbonGeometry(
   offsetMultiplier: number,
   yBottom: number,
