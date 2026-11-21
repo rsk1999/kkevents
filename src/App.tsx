@@ -185,7 +185,7 @@ export const App: React.FC = () => {
 
       {/* 4. SCENE 04: THE BOOKING LOUNGE OVERLAY (When in Lounge) */}
       {isInLounge && hasEntered && !activeProject && (
-        <div className="fixed inset-0 z-40 overflow-y-auto bg-[#F3F0E9]/90 backdrop-blur-md transition-all duration-700 animate-fadeIn">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-[#F3F0E9]/95 backdrop-blur-md transition-all duration-700 animate-fadeIn pointer-events-auto">
           <BookingLoungeOverlay onBackToCorridor={handleBackToCorridorFromLounge} />
         </div>
       )}
@@ -199,8 +199,8 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* 6. HUD CONTROLS & NAVIGATION */}
-      {hasEntered && !activeProject && (
+      {/* 6. HUD CONTROLS & NAVIGATION (Active only during corridor exploration) */}
+      {hasEntered && !activeProject && !isInLounge && (
         <GalleryHUD
           currentProgress={currentProgress}
           nearestProject={nearestProject}

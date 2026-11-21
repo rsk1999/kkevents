@@ -558,6 +558,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     let pointerTotalDrag = 0;
 
     const onPointerMove = (e: PointerEvent) => {
+      if (activeProjectRef.current || isInLoungeRef.current) return;
       mouseNorm.x = (e.clientX / window.innerWidth) * 2 - 1;
       mouseNorm.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
@@ -565,7 +566,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       needsRaycastRef.current = true;
 
       // CAMERA LOOK ACTIVATES ONLY ON ACTIVE LEFT-BUTTON CLICK & DRAG
-      if (isDraggingRef.current && !activeProjectRef.current && e.pointerType !== 'touch') {
+      if (isDraggingRef.current && e.pointerType !== 'touch') {
         const deltaX = e.clientX - dragStartXRef.current;
         const deltaY = e.clientY - dragStartYRef.current;
         dragStartXRef.current = e.clientX;
@@ -584,7 +585,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const onPointerDown = (e: PointerEvent) => {
-      if (activeProjectRef.current) return;
+      if (activeProjectRef.current || isInLoungeRef.current) return;
       // ONLY respond to Left Mouse Button (button 0) for camera looking & frame interaction
       if (e.pointerType === 'mouse' && e.button !== 0) return;
 
@@ -598,6 +599,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const executeDeliberateTap = (clientX: number, clientY: number) => {
+      if (isInLoungeRef.current) return;
       mouseNorm.x = (clientX / window.innerWidth) * 2 - 1;
       mouseNorm.y = -(clientY / window.innerHeight) * 2 + 1;
       raycaster.setFromCamera(mouseNorm, camera);
@@ -616,6 +618,10 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      if (isInLoungeRef.current) {
+        isDraggingRef.current = false;
+        return;
+      }
       if (isDraggingRef.current && e.pointerType !== 'touch') {
         isDraggingRef.current = false;
         const duration = performance.now() - pointerDownTime;
@@ -639,7 +645,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
     // --- 10. FLUID INERTIA MOMENTUM SCROLL ENGINE ALONG SPLINE ---
     const onWheel = (e: WheelEvent) => {
-      if (activeProjectRef.current || selectedProjectIdRef.current) return;
+      if (activeProjectRef.current || selectedProjectIdRef.current || isInLoungeRef.current) return;
       e.preventDefault();
 
       const rawDelta = e.deltaY;
@@ -650,7 +656,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (activeProjectRef.current) return;
+      if (activeProjectRef.current || isInLoungeRef.current) return;
       if (e.key === 'Escape') {
         onBackgroundTapRef.current();
         return;
@@ -674,6 +680,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     let touchTotalDist = 0;
 
     const onTouchStart = (e: TouchEvent) => {
+      if (activeProjectRef.current || isInLoungeRef.current) return;
       if (e.touches.length > 0) {
         touchStartY = e.touches[0].clientY;
         touchStartX = e.touches[0].clientX;
@@ -683,7 +690,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (activeProjectRef.current || e.touches.length === 0) return;
+      if (activeProjectRef.current || isInLoungeRef.current || e.touches.length === 0) return;
       const touchX = e.touches[0].clientX;
       const touchY = e.touches[0].clientY;
       const deltaX = touchStartX - touchX;
@@ -706,6 +713,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const onTouchEnd = () => {
+      if (activeProjectRef.current || isInLoungeRef.current) return;
       const touchDuration = performance.now() - touchStartTime;
       // ONLY trigger tap if user touched cleanly without swiping (< 8px movement and < 350ms)
       if (touchTotalDist < 8 && touchDuration < 350) {
