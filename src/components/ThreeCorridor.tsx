@@ -1,7 +1,16 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { Project } from '../types';
-import { EXHIBITION_PROJECTS, CORRIDOR_CONFIG } from '../data/projects';
+import { EXHIBITION_PROJECTS } from '../data/projects';
+import {
+  CURVED_CONFIG,
+  getPathFrame,
+  createCurvedFloorGeometry,
+  createCurvedCeilingGeometry,
+  createCurvedWallGeometry,
+  createCurvedRibbonGeometry,
+  getCurvedArtworkTransform
+} from '../utils/curveCorridor';
 import {
   createFloorTexture,
   createWallTexture,
@@ -10,8 +19,8 @@ import {
 } from '../utils/textureGenerator';
 
 interface ThreeCorridorProps {
-  currentZ: number;
-  onZChange: (z: number) => void;
+  currentProgress: number; // 0.0 to 1.0 along the curved spline
+  onProgressChange: (u: number) => void;
   onSelectProject: (project: Project) => void;
   activeProject: Project | null;
   isInLounge: boolean;
@@ -22,8 +31,8 @@ interface ThreeCorridorProps {
 }
 
 export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
-  currentZ,
-  onZChange,
+  currentProgress,
+  onProgressChange,
   onSelectProject,
   activeProject,
   isInLounge,
@@ -33,11 +42,11 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Smooth Inertia Physics Engine References
-  const currentZRef = useRef<number>(currentZ);
-  const targetZRef = useRef<number>(currentZ);
-  const velocityZRef = useRef<number>(0);
-  const lastReportedZRef = useRef<number>(currentZ);
+  // Smooth Inertia Physics Engine References along Spline u
+  const currentURef = useRef<number>(currentProgress);
+  const targetURef = useRef<number>(currentProgress);
+  const velocityURef = useRef<number>(0);
+  const lastReportedURef = useRef<number>(currentProgress);
   const lastReportTimeRef = useRef<number>(0);
 
   // Mouse Parallax & Interaction References
@@ -48,9 +57,9 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   const hoveredMeshRef = useRef<THREE.Group | null>(null);
   const needsRaycastRef = useRef<boolean>(true);
 
-  // Prop Callbacks in Refs (to avoid re-triggering Three.js canvas mount)
-  const onZChangeRef = useRef(onZChange);
-  onZChangeRef.current = onZChange;
+  // Prop Callbacks in Refs
+  const onProgressChangeRef = useRef(onProgressChange);
+  onProgressChangeRef.current = onProgressChange;
 
   const onSelectProjectRef = useRef(onSelectProject);
   onSelectProjectRef.current = onSelectProject;
@@ -70,13 +79,13 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   const isAutoTouringRef = useRef(isAutoTouring);
   isAutoTouringRef.current = isAutoTouring;
 
-  // Sync external position jumps (e.g. menu jump or return to corridor)
+  // Sync external position jumps (Directory jump or return to exhibition)
   useEffect(() => {
-    if (Math.abs(targetZRef.current - currentZ) > 0.4) {
-      targetZRef.current = currentZ;
-      velocityZRef.current = 0;
+    if (Math.abs(targetURef.current - currentProgress) > 0.03) {
+      targetURef.current = currentProgress;
+      velocityURef.current = 0;
     }
-  }, [currentZ]);
+  }, [currentProgress]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -85,15 +94,22 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     // --- 1. RENDERER & SCENE SETUP ---
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#F3F0E9');
-    scene.fog = new THREE.FogExp2('#F3F0E9', 0.016);
+    scene.fog = new THREE.FogExp2('#F3F0E9', 0.018);
 
     const camera = new THREE.PerspectiveCamera(
       48,
       window.innerWidth / window.innerHeight,
       0.1,
-      120
+      130
     );
-    camera.position.set(0, CORRIDOR_CONFIG.eyeHeight, currentZRef.current);
+
+    // Initial camera position & orientation on curve
+    const initialFrame = getPathFrame(currentURef.current);
+    camera.position.copy(initialFrame.point).add(new THREE.Vector3(0, CURVED_CONFIG.eyeHeight, 0));
+    const initialLook = initialFrame.point.clone()
+      .add(initialFrame.tangent.clone().multiplyScalar(8.0))
+      .add(new THREE.Vector3(0, CURVED_CONFIG.eyeHeight, 0));
+    camera.lookAt(initialLook);
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -104,7 +120,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
+    renderer.toneMappingExposure = 1.15;
 
     container.appendChild(renderer.domElement);
 
@@ -113,243 +129,239 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     scene.add(ambientLight);
 
     const hemiLight = new THREE.HemisphereLight('#FFFFFF', '#D9D2C2', 0.85);
-    hemiLight.position.set(0, 12, 0);
+    hemiLight.position.set(0, 15, 0);
     scene.add(hemiLight);
 
-    // Soft axial warm glow down the corridor
-    const axisLight = new THREE.DirectionalLight('#FFF5E4', 0.5);
-    axisLight.position.set(0, 8, 8);
-    scene.add(axisLight);
+    // Directional light guiding soft contrast
+    const dirLight = new THREE.DirectionalLight('#FFF5E4', 0.55);
+    dirLight.position.set(2, 12, 10);
+    scene.add(dirLight);
 
-    // --- 3. ARCHITECTURE: FLOOR, CEILING, WALLS ---
-    const corridorLength = 84;
-    const corridorCenterZ = -28;
-
-    // A. Polished Gallery Stone Floor
+    // --- 3. CURVED ARCHITECTURE: FLOOR, CEILING, WALLS ---
+    // A. Continuous Curved Floor (Stone / Microcement with repeating joints)
     const floorTexture = createFloorTexture();
     const floorMat = new THREE.MeshStandardMaterial({
       map: floorTexture,
-      roughness: 0.28,
-      metalness: 0.04,
-      color: '#ECE8DF'
+      roughness: 0.26,
+      metalness: 0.03,
+      color: '#EAE6DC'
     });
-    const floorGeo = new THREE.PlaneGeometry(CORRIDOR_CONFIG.width, corridorLength, 1, 1);
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, corridorCenterZ);
-    scene.add(floor);
+    const floorGeo = createCurvedFloorGeometry();
+    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+    scene.add(floorMesh);
 
-    // B. Architectural Ceiling with Recessed Light Coves
+    // B. Continuous Curved Ceiling
     const ceilingMat = new THREE.MeshBasicMaterial({ color: '#FAF8F5' });
-    const ceilingGeo = new THREE.PlaneGeometry(CORRIDOR_CONFIG.width, corridorLength, 1, 1);
-    const ceiling = new THREE.Mesh(ceilingGeo, ceilingMat);
-    ceiling.rotation.x = Math.PI / 2;
-    ceiling.position.set(0, CORRIDOR_CONFIG.height, corridorCenterZ);
-    scene.add(ceiling);
+    const ceilingGeo = createCurvedCeilingGeometry();
+    const ceilingMesh = new THREE.Mesh(ceilingGeo, ceilingMat);
+    scene.add(ceilingMesh);
 
-    // Architectural Cove Light Troughs (glowing linear recessed strips)
-    const coveLightMat = new THREE.MeshBasicMaterial({ color: '#FFF8EB' });
-    const coveLeftGeo = new THREE.PlaneGeometry(0.35, corridorLength);
-    const coveLeft = new THREE.Mesh(coveLeftGeo, coveLightMat);
-    coveLeft.rotation.x = Math.PI / 2;
-    coveLeft.position.set(-3.2, CORRIDOR_CONFIG.height - 0.01, corridorCenterZ);
-    scene.add(coveLeft);
-
-    const coveRightGeo = new THREE.PlaneGeometry(0.35, corridorLength);
-    const coveRight = new THREE.Mesh(coveRightGeo, coveLightMat);
-    coveRight.rotation.x = Math.PI / 2;
-    coveRight.position.set(3.2, CORRIDOR_CONFIG.height - 0.01, corridorCenterZ);
-    scene.add(coveRight);
-
-    // ERCO-style Museum Track Rails
-    const trackRailGeo = new THREE.BoxGeometry(0.08, 0.06, corridorLength);
-    const trackRailMat = new THREE.MeshBasicMaterial({ color: '#222222' });
-    const trackLeft = new THREE.Mesh(trackRailGeo, trackRailMat);
-    trackLeft.position.set(-2.4, CORRIDOR_CONFIG.height - 0.04, corridorCenterZ);
-    scene.add(trackLeft);
-
-    const trackRight = new THREE.Mesh(trackRailGeo, trackRailMat);
-    trackRight.position.set(2.4, CORRIDOR_CONFIG.height - 0.04, corridorCenterZ);
-    scene.add(trackRight);
-
-    // C. Gallery Walls
+    // C. Continuous Curved Left & Right Walls
     const wallTexture = createWallTexture();
-    const wallMaterial = new THREE.MeshStandardMaterial({
+    const wallMat = new THREE.MeshStandardMaterial({
       map: wallTexture,
       color: '#F3F0E9',
       roughness: 0.88,
       metalness: 0.0
     });
 
-    const leftWallGeo = new THREE.PlaneGeometry(corridorLength, CORRIDOR_CONFIG.height, 1, 1);
-    const leftWall = new THREE.Mesh(leftWallGeo, wallMaterial);
-    leftWall.rotation.y = Math.PI / 2;
-    leftWall.position.set(CORRIDOR_CONFIG.leftWallX, CORRIDOR_CONFIG.height / 2, corridorCenterZ);
-    scene.add(leftWall);
+    const leftWallGeo = createCurvedWallGeometry('left');
+    const leftWallMesh = new THREE.Mesh(leftWallGeo, wallMat);
+    scene.add(leftWallMesh);
 
-    const rightWallGeo = new THREE.PlaneGeometry(corridorLength, CORRIDOR_CONFIG.height, 1, 1);
-    const rightWall = new THREE.Mesh(rightWallGeo, wallMaterial);
-    rightWall.rotation.y = -Math.PI / 2;
-    rightWall.position.set(CORRIDOR_CONFIG.rightWallX, CORRIDOR_CONFIG.height / 2, corridorCenterZ);
-    scene.add(rightWall);
+    const rightWallGeo = createCurvedWallGeometry('right');
+    const rightWallMesh = new THREE.Mesh(rightWallGeo, wallMat);
+    scene.add(rightWallMesh);
 
-    // Baseboards & Champagne Gold Reveal Lines
-    const baseboardGeo = new THREE.BoxGeometry(0.06, 0.22, corridorLength);
-    const baseboardMat = new THREE.MeshBasicMaterial({ color: '#282725' });
-    const baseboardLeft = new THREE.Mesh(baseboardGeo, baseboardMat);
-    baseboardLeft.position.set(CORRIDOR_CONFIG.leftWallX + 0.03, 0.11, corridorCenterZ);
-    scene.add(baseboardLeft);
+    // D. Baseboards & Champagne Gold Reveal Strips along Curve
+    const baseboardMat = new THREE.MeshBasicMaterial({ color: '#262524' });
+    const leftBaseboardGeo = createCurvedRibbonGeometry(-0.99, 0.0, 0.22);
+    const leftBaseboard = new THREE.Mesh(leftBaseboardGeo, baseboardMat);
+    scene.add(leftBaseboard);
 
-    const baseboardRight = new THREE.Mesh(baseboardGeo, baseboardMat);
-    baseboardRight.position.set(CORRIDOR_CONFIG.rightWallX - 0.03, 0.11, corridorCenterZ);
-    scene.add(baseboardRight);
+    const rightBaseboardGeo = createCurvedRibbonGeometry(0.99, 0.0, 0.22);
+    const rightBaseboard = new THREE.Mesh(rightBaseboardGeo, baseboardMat);
+    scene.add(rightBaseboard);
 
-    const revealLineGeo = new THREE.BoxGeometry(0.03, 0.02, corridorLength);
-    const revealLineMat = new THREE.MeshBasicMaterial({ color: '#B89A6A' });
-    const revealLeft = new THREE.Mesh(revealLineGeo, revealLineMat);
-    revealLeft.position.set(CORRIDOR_CONFIG.leftWallX + 0.02, 0.23, corridorCenterZ);
-    scene.add(revealLeft);
+    const goldTrimMat = new THREE.MeshBasicMaterial({ color: '#B89A6A' });
+    const leftGoldTrimGeo = createCurvedRibbonGeometry(-0.985, 0.22, 0.24);
+    const leftGoldTrim = new THREE.Mesh(leftGoldTrimGeo, goldTrimMat);
+    scene.add(leftGoldTrim);
 
-    const revealRight = new THREE.Mesh(revealLineGeo, revealLineMat);
-    revealRight.position.set(CORRIDOR_CONFIG.rightWallX - 0.02, 0.23, corridorCenterZ);
-    scene.add(revealRight);
+    const rightGoldTrimGeo = createCurvedRibbonGeometry(0.985, 0.22, 0.24);
+    const rightGoldTrim = new THREE.Mesh(rightGoldTrimGeo, goldTrimMat);
+    scene.add(rightGoldTrim);
 
-    // --- 4. ARCHITECTURAL PORTAL ARCHES (Depth, Rhythm & Parallax) ---
-    // Sculptural minimalist portals spaced down the corridor
-    const archPositions = [8.0, -8.0, -24.0, -40.0, -56.0];
+    // E. Ceiling Cove Light Strips (Warm glow ribbons following the curved spline)
+    const coveLightMat = new THREE.MeshBasicMaterial({ color: '#FFF8EA' });
+    const leftCoveGeo = createCurvedRibbonGeometry(-0.88, CURVED_CONFIG.height - 0.03, CURVED_CONFIG.height);
+    const leftCove = new THREE.Mesh(leftCoveGeo, coveLightMat);
+    scene.add(leftCove);
+
+    const rightCoveGeo = createCurvedRibbonGeometry(0.88, CURVED_CONFIG.height - 0.03, CURVED_CONFIG.height);
+    const rightCove = new THREE.Mesh(rightCoveGeo, coveLightMat);
+    scene.add(rightCove);
+
+    // F. ERCO Minimalist Ceiling Track Rails following the curve
+    const trackMat = new THREE.MeshBasicMaterial({ color: '#222222' });
+    const leftTrackGeo = createCurvedRibbonGeometry(-0.55, CURVED_CONFIG.height - 0.08, CURVED_CONFIG.height - 0.02);
+    const leftTrack = new THREE.Mesh(leftTrackGeo, trackMat);
+    scene.add(leftTrack);
+
+    const rightTrackGeo = createCurvedRibbonGeometry(0.55, CURVED_CONFIG.height - 0.08, CURVED_CONFIG.height - 0.02);
+    const rightTrack = new THREE.Mesh(rightTrackGeo, trackMat);
+    scene.add(rightTrack);
+
+    // --- 4. SCULPTURAL ARCHITECTURAL PORTAL ARCHES ALONG THE CURVE ---
+    // Minimalist gallery arches oriented to local tangent at key curve thresholds
+    const archUValues = [0.07, 0.28, 0.50, 0.72, 0.90];
     const archMat = new THREE.MeshStandardMaterial({
       color: '#EAE6DC',
-      roughness: 0.5,
+      roughness: 0.45,
       metalness: 0.02
     });
 
-    archPositions.forEach((archZ) => {
+    archUValues.forEach((archU) => {
+      const { point, tangent, up, normal } = getPathFrame(archU);
       const archGroup = new THREE.Group();
-      archGroup.position.set(0, 0, archZ);
+      archGroup.position.copy(point);
+
+      // Align arch group with local path tangent & normal
+      const rotMat = new THREE.Matrix4().makeBasis(normal, up, tangent);
+      archGroup.quaternion.setFromRotationMatrix(rotMat);
+
+      const halfW = CURVED_CONFIG.width / 2;
 
       // Left Pillar
       const pillarL = new THREE.Mesh(
-        new THREE.BoxGeometry(0.4, CORRIDOR_CONFIG.height, 0.5),
+        new THREE.BoxGeometry(0.42, CURVED_CONFIG.height, 0.55),
         archMat
       );
-      pillarL.position.set(CORRIDOR_CONFIG.leftWallX + 0.2, CORRIDOR_CONFIG.height / 2, 0);
+      pillarL.position.set(-halfW + 0.21, CURVED_CONFIG.height / 2, 0);
       archGroup.add(pillarL);
 
       // Right Pillar
       const pillarR = new THREE.Mesh(
-        new THREE.BoxGeometry(0.4, CORRIDOR_CONFIG.height, 0.5),
+        new THREE.BoxGeometry(0.42, CURVED_CONFIG.height, 0.55),
         archMat
       );
-      pillarR.position.set(CORRIDOR_CONFIG.rightWallX - 0.2, CORRIDOR_CONFIG.height / 2, 0);
+      pillarR.position.set(halfW - 0.21, CURVED_CONFIG.height / 2, 0);
       archGroup.add(pillarR);
 
-      // Top Beam / Lintel
+      // Top Lintel
       const lintel = new THREE.Mesh(
-        new THREE.BoxGeometry(CORRIDOR_CONFIG.width, 0.45, 0.5),
+        new THREE.BoxGeometry(CURVED_CONFIG.width, 0.48, 0.55),
         archMat
       );
-      lintel.position.set(0, CORRIDOR_CONFIG.height - 0.225, 0);
+      lintel.position.set(0, CURVED_CONFIG.height - 0.24, 0);
       archGroup.add(lintel);
 
-      // Subtle Gold Inset Trim along portal arch
-      const trimMat = new THREE.MeshBasicMaterial({ color: '#B89A6A' });
-      const trimTop = new THREE.Mesh(new THREE.BoxGeometry(CORRIDOR_CONFIG.width - 0.8, 0.03, 0.52), trimMat);
-      trimTop.position.set(0, CORRIDOR_CONFIG.height - 0.46, 0);
-      archGroup.add(trimTop);
+      // Gold Inset Accent Line
+      const goldTrim = new THREE.Mesh(
+        new THREE.BoxGeometry(CURVED_CONFIG.width - 0.84, 0.03, 0.58),
+        goldTrimMat
+      );
+      goldTrim.position.set(0, CURVED_CONFIG.height - 0.48, 0);
+      archGroup.add(goldTrim);
 
       scene.add(archGroup);
     });
 
-    // --- 5. MINIMALIST GALLERY BENCHES ---
-    // Travertine & bronze benches along the center aisle between bays
-    const benchPositions = [-1.0, -17.0, -33.0, -49.0];
+    // --- 5. MINIMALIST GALLERY VIEWING BENCHES ALONG THE CURVE ---
+    const benchUValues = [0.18, 0.39, 0.61, 0.82];
     const benchStoneMat = new THREE.MeshStandardMaterial({
-      color: '#E0DBD0',
+      color: '#DFDBD1',
       roughness: 0.35
     });
-    const benchLegMat = new THREE.MeshBasicMaterial({ color: '#222222' });
+    const benchBaseMat = new THREE.MeshBasicMaterial({ color: '#222222' });
 
-    benchPositions.forEach((bz) => {
+    benchUValues.forEach((bu) => {
+      const { point, tangent, up, normal } = getPathFrame(bu);
       const benchGroup = new THREE.Group();
-      benchGroup.position.set(0, 0, bz);
+      // Position slightly off center
+      const lateralOffset = (bu > 0.5 ? -1 : 1) * 0.4;
+      benchGroup.position.copy(point).add(normal.clone().multiplyScalar(lateralOffset));
 
-      // Top Slab
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.12, 0.6), benchStoneMat);
+      const rotMat = new THREE.Matrix4().makeBasis(normal, up, tangent);
+      benchGroup.quaternion.setFromRotationMatrix(rotMat);
+
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.12, 1.45), benchStoneMat);
       slab.position.set(0, 0.48, 0);
       benchGroup.add(slab);
 
-      // Minimalist Block Legs
-      const leg1 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.42, 0.4), benchLegMat);
-      leg1.position.set(0, 0.21, 0);
-      benchGroup.add(leg1);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.42, 1.25), benchBaseMat);
+      base.position.set(0, 0.21, 0);
+      benchGroup.add(base);
 
       scene.add(benchGroup);
     });
 
     // --- 6. FLOATING GOLDEN ATMOSPHERIC DUST PARTICLES ---
-    // Drifting luminous motes that catch light beams for cinematic depth
-    const particleCount = 160;
+    const particleCount = 180;
     const particleGeo = new THREE.BufferGeometry();
     const particlePositions = new Float32Array(particleCount * 3);
-    for (let i = 0; i < particleCount * 3; i += 3) {
-      particlePositions[i] = (Math.random() - 0.5) * (CORRIDOR_CONFIG.width - 2);
-      particlePositions[i + 1] = 0.5 + Math.random() * (CORRIDOR_CONFIG.height - 1.5);
-      particlePositions[i + 2] = 10 - Math.random() * 75;
+    for (let i = 0; i < particleCount; i++) {
+      const u = Math.random();
+      const { point, normal } = getPathFrame(u);
+      const lateral = (Math.random() - 0.5) * (CURVED_CONFIG.width - 2.5);
+      const p = point.clone().add(normal.clone().multiplyScalar(lateral));
+
+      particlePositions[i * 3] = p.x;
+      particlePositions[i * 3 + 1] = 0.6 + Math.random() * (CURVED_CONFIG.height - 1.6);
+      particlePositions[i * 3 + 2] = p.z;
     }
     particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
     const particleMat = new THREE.PointsMaterial({
       color: '#DFC8A1',
       size: 0.045,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.7,
       blending: THREE.AdditiveBlending
     });
     const particles = new THREE.Points(particleGeo, particleMat);
     scene.add(particles);
 
-    // --- 7. FINAL BOOKING ROOM & LOUNGE (Z = -60 to -80) ---
-    const loungeWidth = 24;
+    // --- 7. GRAND BOOKING LOUNGE PAVILION AT THE END (u >= 0.92) ---
+    const loungeFrame = getPathFrame(0.96);
+    const loungeCenter = loungeFrame.point.clone();
+    const loungeRadius = 13.0;
     const loungeHeight = 9.8;
-    const loungeDepth = 24;
-    const loungeZ = -74;
 
-    const loungeFloor = new THREE.Mesh(
-      new THREE.PlaneGeometry(loungeWidth, loungeDepth, 1, 1),
-      floorMat
-    );
-    loungeFloor.rotation.x = -Math.PI / 2;
-    loungeFloor.position.set(0, 0, loungeZ);
+    // Circular/Oval Lounge Floor
+    const loungeFloorGeo = new THREE.CylinderGeometry(loungeRadius, loungeRadius, 0.05, 48);
+    const loungeFloor = new THREE.Mesh(loungeFloorGeo, floorMat);
+    loungeFloor.position.set(loungeCenter.x, -0.02, loungeCenter.z);
     scene.add(loungeFloor);
 
-    const loungeCeiling = new THREE.Mesh(
-      new THREE.PlaneGeometry(loungeWidth, loungeDepth, 1, 1),
-      ceilingMat
+    // Lounge Panoramic Architectural Wall
+    const loungeWallGeo = new THREE.CylinderGeometry(
+      loungeRadius,
+      loungeRadius,
+      loungeHeight,
+      48,
+      1,
+      true,
+      0,
+      Math.PI * 1.6
     );
-    loungeCeiling.rotation.x = Math.PI / 2;
-    loungeCeiling.position.set(0, loungeHeight, loungeZ);
-    scene.add(loungeCeiling);
-
-    // Back Architectural Wall with soft ambient illumination
-    const glassWallMat = new THREE.MeshStandardMaterial({
-      color: '#E8E3D8',
-      roughness: 0.1,
-      metalness: 0.08
+    const loungeWallMat = new THREE.MeshStandardMaterial({
+      color: '#EAE5DB',
+      roughness: 0.5,
+      side: THREE.BackSide
     });
-    const glassWall = new THREE.Mesh(
-      new THREE.PlaneGeometry(loungeWidth, loungeHeight, 1, 1),
-      glassWallMat
-    );
-    glassWall.position.set(0, loungeHeight / 2, loungeZ - loungeDepth / 2);
-    scene.add(glassWall);
+    const loungeWall = new THREE.Mesh(loungeWallGeo, loungeWallMat);
+    loungeWall.position.set(loungeCenter.x, loungeHeight / 2, loungeCenter.z);
+    loungeWall.rotation.y = Math.PI * 0.4;
+    scene.add(loungeWall);
 
-    // Grand Columns in Lounge
-    const pillarGeo = new THREE.CylinderGeometry(0.42, 0.42, loungeHeight, 16);
-    const pillarMat = new THREE.MeshStandardMaterial({ color: '#EAE6DD', roughness: 0.3 });
-    const p1 = new THREE.Mesh(pillarGeo, pillarMat);
-    p1.position.set(-6, loungeHeight / 2, -67);
+    // Lounge Columns
+    const loungePillarGeo = new THREE.CylinderGeometry(0.42, 0.42, loungeHeight, 16);
+    const p1 = new THREE.Mesh(loungePillarGeo, archMat);
+    p1.position.set(loungeCenter.x - 5.5, loungeHeight / 2, loungeCenter.z - 4);
     scene.add(p1);
-    const p2 = new THREE.Mesh(pillarGeo, pillarMat);
-    p2.position.set(6, loungeHeight / 2, -67);
+
+    const p2 = new THREE.Mesh(loungePillarGeo, archMat);
+    p2.position.set(loungeCenter.x + 5.5, loungeHeight / 2, loungeCenter.z - 4);
     scene.add(p2);
 
     // Center Plinth
@@ -357,41 +369,48 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       new THREE.BoxGeometry(2.4, 0.9, 2.4),
       new THREE.MeshStandardMaterial({ color: '#222222', roughness: 0.25 })
     );
-    plinth.position.set(0, 0.45, -71);
+    plinth.position.set(loungeCenter.x, 0.45, loungeCenter.z);
     scene.add(plinth);
 
-    // Glowing Champagne Gold Sculpture
+    // Champagne Gold Sculpture
     const sculpture = new THREE.Mesh(
-      new THREE.TorusKnotGeometry(0.68, 0.18, 64, 16, 2, 3),
+      new THREE.TorusKnotGeometry(0.72, 0.18, 64, 16, 2, 3),
       new THREE.MeshStandardMaterial({
         color: '#B89A6A',
-        metalness: 0.9,
+        metalness: 0.92,
         roughness: 0.15
       })
     );
-    sculpture.position.set(0, 1.65, -71);
+    sculpture.position.set(loungeCenter.x, 1.7, loungeCenter.z);
     scene.add(sculpture);
 
-    // --- 8. ARTWORK EXHIBITS & SPOTLIGHTS ---
+    // Lounge Ceiling
+    const loungeCeilingGeo = new THREE.CylinderGeometry(loungeRadius, loungeRadius, 0.05, 48);
+    const loungeCeiling = new THREE.Mesh(loungeCeilingGeo, ceilingMat);
+    loungeCeiling.position.set(loungeCenter.x, loungeHeight, loungeCenter.z);
+    scene.add(loungeCeiling);
+
+    // --- 8. ARTWORK EXHIBITS MOUNTED FLUSH TO THE CURVED WALLS ---
     const interactiveMeshes: THREE.Mesh[] = [];
     const textureLoader = new THREE.TextureLoader();
 
     EXHIBITION_PROJECTS.forEach((project) => {
-      const isLeft = project.side === 'left';
-      const wallX = isLeft ? CORRIDOR_CONFIG.leftWallX : CORRIDOR_CONFIG.rightWallX;
-      const normalSign = isLeft ? 1 : -1;
+      // Calculate exact 3D position and orientation matching the curve
+      const { position, quaternion, normal } = getCurvedArtworkTransform(
+        project.pathU,
+        project.side
+      );
 
-      // Group attached to the gallery wall
       const group = new THREE.Group();
-      group.userData = { project, originalX: wallX + normalSign * 0.12, normalSign };
-      group.position.set(wallX + normalSign * 0.12, CORRIDOR_CONFIG.eyeHeight + 0.32, project.wallZ);
-      group.rotation.y = isLeft ? Math.PI / 2 : -Math.PI / 2;
+      group.userData = { project, originalPos: position.clone(), normal: normal.clone() };
+      group.position.copy(position);
+      group.quaternion.copy(quaternion);
 
       const w = project.width;
       const h = project.height;
       const frameDepth = 0.09;
 
-      // Outer Brushed Champagne Gold Frame
+      // Outer Brushed Champagne Gold Bevel Frame
       const frameGeo = new THREE.BoxGeometry(w + 0.16, h + 0.16, frameDepth);
       const frameMat = new THREE.MeshStandardMaterial({
         color: '#B89A6A',
@@ -408,7 +427,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       innerMatMesh.position.z = frameDepth / 2 + 0.005;
       group.add(innerMatMesh);
 
-      // Artwork Plane
+      // High-Quality Artwork Plane
       const artGeo = new THREE.PlaneGeometry(w, h, 1, 1);
       const fallbackTexture = createFallbackArtworkTexture(project);
       const artMat = new THREE.MeshBasicMaterial({
@@ -435,7 +454,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
         }
       );
 
-      // Museum Placard underneath frame
+      // Museum Placard Underneath Frame
       const placardGeo = new THREE.PlaneGeometry(Math.min(w * 0.75, 2.4), 0.52, 1, 1);
       const placardTexture = createPlacardTexture(project);
       const placardMat = new THREE.MeshBasicMaterial({
@@ -448,36 +467,42 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       group.add(placardMesh);
       interactiveMeshes.push(placardMesh);
 
-      // Floor Warm Light Wash Disc (subtle illuminated pool under each artwork)
+      // Subtle Floor Light Wash Pool along Curve
       const floorDiscGeo = new THREE.PlaneGeometry(w * 1.1, 1.8);
       const floorDiscMat = new THREE.MeshBasicMaterial({
-        color: '#FFF5E0',
+        color: '#FFF6E0',
         transparent: true,
-        opacity: 0.16
+        opacity: 0.18
       });
       const floorDisc = new THREE.Mesh(floorDiscGeo, floorDiscMat);
       floorDisc.rotation.x = -Math.PI / 2;
-      floorDisc.position.set(wallX + normalSign * 0.9, 0.01, project.wallZ);
+      floorDisc.position.copy(position);
+      floorDisc.position.y = 0.01;
+      floorDisc.position.add(normal.clone().multiplyScalar(0.9));
       scene.add(floorDisc);
 
-      // Dedicated Focused Ceiling Spotlight with standalone target
+      // Dedicated Focused Ceiling Spotlight positioned along curved track
       const spotLight = new THREE.SpotLight('#FFF6E5', 3.4, 14, Math.PI / 4.5, 0.45, 1.0);
-      const trackX = isLeft ? -2.4 : 2.4;
-      spotLight.position.set(trackX, CORRIDOR_CONFIG.height - 0.2, project.wallZ);
+      const { point: pathPt, normal: pathNorm } = getPathFrame(project.pathU);
+      const trackDist = (project.side === 'left' ? -1 : 1) * 2.3;
+      const spotPos = pathPt.clone().add(pathNorm.clone().multiplyScalar(trackDist));
+      spotPos.y = CURVED_CONFIG.height - 0.2;
+      spotLight.position.copy(spotPos);
 
-      // Standalone target object on wall
+      // Standalone spotlight target
       const spotTarget = new THREE.Object3D();
-      spotTarget.position.set(wallX, CORRIDOR_CONFIG.eyeHeight + 0.32, project.wallZ);
+      spotTarget.position.copy(position);
       scene.add(spotTarget);
       spotLight.target = spotTarget;
       scene.add(spotLight);
 
-      // Ceiling fixture marker
+      // Ceiling Track Fixture Marker
       const fixtureGeo = new THREE.CylinderGeometry(0.08, 0.1, 0.2, 8);
       const fixtureMat = new THREE.MeshBasicMaterial({ color: '#222222' });
       const fixture = new THREE.Mesh(fixtureGeo, fixtureMat);
-      fixture.position.set(trackX, CORRIDOR_CONFIG.height - 0.15, project.wallZ);
-      fixture.lookAt(group.position);
+      fixture.position.copy(spotPos);
+      fixture.position.y = CURVED_CONFIG.height - 0.12;
+      fixture.lookAt(position);
       scene.add(fixture);
 
       scene.add(group);
@@ -494,11 +519,11 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       targetMouseRef.current.copy(mouseNorm);
       needsRaycastRef.current = true;
 
-      // Handle Drag Navigation
+      // Drag to walk along the curved spline
       if (isDraggingRef.current && !activeProjectRef.current) {
         const deltaDragY = e.clientY - dragStartYRef.current;
         dragStartYRef.current = e.clientY;
-        velocityZRef.current -= deltaDragY * 0.025;
+        velocityURef.current += deltaDragY * 0.00032;
       }
     };
 
@@ -531,25 +556,24 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     window.addEventListener('mouseup', onMouseUp);
     window.addEventListener('click', onClick);
 
-    // --- 10. FLUID INERTIA MOMENTUM SCROLL ENGINE ---
+    // --- 10. FLUID INERTIA MOMENTUM SCROLL ENGINE ALONG SPLINE ---
     const onWheel = (e: WheelEvent) => {
       if (activeProjectRef.current) return;
       e.preventDefault();
 
-      // Normalize wheel delta across varying mice & trackpads
       const rawDelta = e.deltaY;
       const normalized = Math.sign(rawDelta) * Math.min(Math.abs(rawDelta), 55);
 
-      // Add to physical velocity accumulator
-      velocityZRef.current -= normalized * 0.0038;
+      // Add to physical velocity accumulator along parameter u
+      velocityURef.current += normalized * 0.000048;
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (activeProjectRef.current) return;
       if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S' || e.key === 'PageDown') {
-        velocityZRef.current -= 0.22;
+        velocityURef.current += 0.0028;
       } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === 'PageUp') {
-        velocityZRef.current += 0.22;
+        velocityURef.current -= 0.0028;
       }
     };
 
@@ -563,7 +587,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       const deltaY = touchStartY - touchY;
       touchStartY = touchY;
 
-      velocityZRef.current -= deltaY * 0.018;
+      velocityURef.current += deltaY * 0.00022;
     };
 
     window.addEventListener('wheel', onWheel, { passive: false });
@@ -578,7 +602,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
     window.addEventListener('resize', onResize);
 
-    // --- 11. LUXURY 60-120 FPS CINEMATIC RENDER & PHYSICS LOOP ---
+    // --- 11. CINEMATIC RENDER & CURVED PATH TRAVERSAL LOOP ---
     let animationId: number;
     let lastTime = performance.now();
     let elapsedTime = 0;
@@ -592,30 +616,30 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
       // Auto-Tour glide if active
       if (isAutoTouringRef.current && !activeProjectRef.current && !isDraggingRef.current) {
-        if (targetZRef.current > CORRIDOR_CONFIG.minScroll + 3.0) {
-          velocityZRef.current -= 0.008;
+        if (targetURef.current < CURVED_CONFIG.maxU - 0.03) {
+          velocityURef.current += 0.0001;
         }
       }
 
-      // Physics Friction / Decay (Silky exponential decay)
+      // Physics Friction / Decay along the curve
       const friction = Math.pow(0.86, delta * 60);
-      velocityZRef.current *= friction;
+      velocityURef.current *= friction;
 
-      // Update target based on velocity
-      targetZRef.current += velocityZRef.current * delta * 60;
+      // Update target along u
+      targetURef.current += velocityURef.current * delta * 60;
 
-      // Soft clamp bounds with gentle bumper
-      if (targetZRef.current < CORRIDOR_CONFIG.minScroll) {
-        targetZRef.current = CORRIDOR_CONFIG.minScroll;
-        velocityZRef.current = 0;
-      } else if (targetZRef.current > CORRIDOR_CONFIG.maxScroll) {
-        targetZRef.current = CORRIDOR_CONFIG.maxScroll;
-        velocityZRef.current = 0;
+      // Soft clamp bounds along spline
+      if (targetURef.current < CURVED_CONFIG.minU) {
+        targetURef.current = CURVED_CONFIG.minU;
+        velocityURef.current = 0;
+      } else if (targetURef.current > CURVED_CONFIG.maxU) {
+        targetURef.current = CURVED_CONFIG.maxU;
+        velocityURef.current = 0;
       }
 
-      // Smooth Camera Z Lerp (Steadycam Glide)
+      // Smooth Parameter U Lerp
       const lerpFactor = 1.0 - Math.exp(-9.0 * delta);
-      currentZRef.current += (targetZRef.current - currentZRef.current) * lerpFactor;
+      currentURef.current += (targetURef.current - currentURef.current) * lerpFactor;
 
       // Mouse Parallax Smooth Easing
       const mouseFactor = 1.0 - Math.exp(-5.5 * delta);
@@ -623,39 +647,44 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       mousePosRef.current.y += (targetMouseRef.current.y - mousePosRef.current.y) * mouseFactor;
 
       // Check Lounge Transition
-      if (currentZRef.current <= -63 && !isInLoungeRef.current) {
+      if (currentURef.current >= CURVED_CONFIG.loungeU && !isInLoungeRef.current) {
         onEnterLoungeRef.current();
       }
 
       // Throttle React State Updates to keep main thread completely unblocked
-      const zDiff = Math.abs(currentZRef.current - lastReportedZRef.current);
-      if (zDiff > 0.16 && now - lastReportTimeRef.current > 45) {
-        lastReportedZRef.current = currentZRef.current;
+      const uDiff = Math.abs(currentURef.current - lastReportedURef.current);
+      if (uDiff > 0.005 && now - lastReportTimeRef.current > 45) {
+        lastReportedURef.current = currentURef.current;
         lastReportTimeRef.current = now;
-        onZChangeRef.current(currentZRef.current);
+        onProgressChangeRef.current(currentURef.current);
       }
 
-      // Steadycam Camera Positioning (Smooth glide without jitter)
-      camera.position.z = currentZRef.current;
-      camera.position.y = CORRIDOR_CONFIG.eyeHeight;
-      camera.position.x = mousePosRef.current.x * 0.08;
+      // --- CALCULATE CAMERA POSITION & ORIENTATION ON CURVE ---
+      const curFrame = getPathFrame(currentURef.current);
+      const camPos = curFrame.point.clone().add(new THREE.Vector3(0, CURVED_CONFIG.eyeHeight, 0));
+      // Subtle lateral mouse sway
+      camPos.add(curFrame.normal.clone().multiplyScalar(mousePosRef.current.x * 0.14));
+      camera.position.copy(camPos);
 
-      // Look Direction with subtle head tilt
-      const lookTargetX = mousePosRef.current.x * 0.42;
-      const lookTargetY = CORRIDOR_CONFIG.eyeHeight + mousePosRef.current.y * 0.22;
-      const lookTargetZ = camera.position.z - 8.5;
-      camera.lookAt(lookTargetX, lookTargetY, lookTargetZ);
+      // Natural Look-Ahead along the curve bend
+      // Look forward along the curve tangent by ~0.055 of curve length
+      const lookAheadU = Math.min(0.9999, currentURef.current + 0.055);
+      const lookFrame = getPathFrame(lookAheadU);
+      const lookTarget = lookFrame.point.clone().add(new THREE.Vector3(0, CURVED_CONFIG.eyeHeight, 0));
+      // Apply subtle mouse look offset
+      lookTarget.add(curFrame.normal.clone().multiplyScalar(mousePosRef.current.x * 0.7));
+      lookTarget.y += mousePosRef.current.y * 0.35;
+      camera.lookAt(lookTarget);
 
-      // Subtle atmospheric dust animation
+      // Floating dust particles animation
       const pPositions = particleGeo.attributes.position.array as Float32Array;
       const time = elapsedTime * 0.3;
       for (let i = 0; i < particleCount; i++) {
-        const i3 = i * 3;
-        pPositions[i3 + 1] += Math.sin(time + i) * 0.001; // subtle float
+        pPositions[i * 3 + 1] += Math.sin(time + i) * 0.001;
       }
       particleGeo.attributes.position.needsUpdate = true;
 
-      // Sculpture Rotation
+      // Lounge sculpture rotation
       sculpture.rotation.y += delta * 0.18;
 
       // Event-driven raycasting
@@ -670,7 +699,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
           if (project) {
             onHoverProjectRef.current(project.id);
             const parentGroup = hit.parent as THREE.Group;
-            if (parentGroup && parentGroup.userData.originalX !== undefined) {
+            if (parentGroup && parentGroup.userData.originalPos !== undefined) {
               hoveredMeshRef.current = parentGroup;
             }
           }
@@ -680,13 +709,12 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
         }
       }
 
-      // Smooth hover frame elevation
-      if (hoveredMeshRef.current && hoveredMeshRef.current.userData.originalX !== undefined) {
-        const targetLift =
-          hoveredMeshRef.current.userData.originalX +
-          hoveredMeshRef.current.userData.normalSign * 0.15;
-        hoveredMeshRef.current.position.x +=
-          (targetLift - hoveredMeshRef.current.position.x) * 0.15;
+      // Smooth hover frame elevation along local normal vector
+      if (hoveredMeshRef.current && hoveredMeshRef.current.userData.originalPos !== undefined) {
+        const orig = hoveredMeshRef.current.userData.originalPos as THREE.Vector3;
+        const norm = hoveredMeshRef.current.userData.normal as THREE.Vector3;
+        const targetLift = orig.clone().add(norm.clone().multiplyScalar(0.18));
+        hoveredMeshRef.current.position.lerp(targetLift, 0.15);
       }
 
       renderer.render(scene, camera);

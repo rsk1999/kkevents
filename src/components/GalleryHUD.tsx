@@ -3,7 +3,7 @@ import { Menu, Volume2, VolumeX, ArrowUpRight, ChevronLeft, ChevronRight, Compas
 import type { Project } from '../types';
 
 interface GalleryHUDProps {
-  currentZ: number;
+  currentProgress: number;
   nearestProject: Project | null;
   onOpenMenu: () => void;
   onToggleAudio: () => void;
@@ -18,7 +18,7 @@ interface GalleryHUDProps {
 }
 
 export const GalleryHUD: React.FC<GalleryHUDProps> = ({
-  currentZ,
+  currentProgress,
   nearestProject,
   onOpenMenu,
   onToggleAudio,
@@ -31,12 +31,8 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
   isAutoTouring,
   onToggleAutoTour
 }) => {
-  // Calculate progress percentage (Entrance Z = 8.0 -> Lounge Z = -66.0)
-  const startZ = 8.0;
-  const endZ = -66.0;
-  const totalDist = startZ - endZ;
-  const currentDist = Math.max(0, Math.min(totalDist, startZ - currentZ));
-  const progressPercent = Math.min(100, Math.max(0, (currentDist / totalDist) * 100));
+  // Direct progress percentage from curved path progress (0% to 100%)
+  const progressPercent = Math.min(100, Math.max(0, currentProgress * 100));
 
   return (
     <div className="pointer-events-none fixed inset-0 z-30 flex flex-col justify-between p-4 sm:p-8 select-none">

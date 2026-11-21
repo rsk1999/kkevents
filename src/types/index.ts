@@ -6,6 +6,7 @@ export interface Project {
   category: 'Wedding' | 'Engagement' | 'Corporate' | 'Birthday' | 'Stage' | 'Decoration' | 'Special' | 'Featured';
   side: 'left' | 'right';
   wallZ: number;
+  pathU: number;
   width: number;
   height: number;
   aspectRatio: number;

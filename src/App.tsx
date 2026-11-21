@@ -12,8 +12,9 @@ import { soundscape } from './audio/soundscape';
 
 export const App: React.FC = () => {
   const [hasEntered, setHasEntered] = useState(false);
-  const [currentZ, setCurrentZ] = useState(10.0);
-  const [savedReturnZ, setSavedReturnZ] = useState(8.0);
+  // Spline Progress u: 0.04 (entrance) to 0.96 (booking lounge)
+  const [currentProgress, setCurrentProgress] = useState(0.04);
+  const [savedReturnProgress, setSavedReturnProgress] = useState(0.04);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [isInLounge, setIsInLounge] = useState(false);
   const [isAudioOn, setIsAudioOn] = useState(false);
@@ -31,8 +32,7 @@ export const App: React.FC = () => {
   // Enter the 3D gallery from Scene 01
   const handleEnterExperience = useCallback(() => {
     setHasEntered(true);
-    setCurrentZ(7.5);
-    // User interacted with page, safe to start sound if not already running
+    setCurrentProgress(0.07);
     if (!isAudioOn) {
       soundscape.play();
       setIsAudioOn(true);
@@ -41,39 +41,39 @@ export const App: React.FC = () => {
 
   const handleSkipIntro = useCallback(() => {
     setHasEntered(true);
-    setCurrentZ(7.5);
+    setCurrentProgress(0.07);
   }, []);
 
   // Open Project Details (Scene 03)
   const handleSelectProject = useCallback((project: Project) => {
-    setSavedReturnZ(currentZ);
+    setSavedReturnProgress(currentProgress);
     setActiveProject(project);
     soundscape.triggerChime(1.2);
-  }, [currentZ]);
+  }, [currentProgress]);
 
-  // Return to exact location in corridor
+  // Return to exact location on curved spline
   const handleCloseProject = useCallback(() => {
     setActiveProject(null);
-    setCurrentZ(savedReturnZ);
-  }, [savedReturnZ]);
+    setCurrentProgress(savedReturnProgress);
+  }, [savedReturnProgress]);
 
   // Jump from project page directly to booking room
   const handlePlanFromProject = useCallback(() => {
     setActiveProject(null);
-    setCurrentZ(-71.0);
+    setCurrentProgress(0.95);
     setIsInLounge(true);
   }, []);
 
-  // Jump directly to a project from Menu Directory
+  // Jump directly to a project from Menu Directory along the curve
   const handleJumpToProject = useCallback((project: Project) => {
-    // Position camera just slightly in front of the artwork
-    setCurrentZ(project.wallZ + 3.8);
+    // Position camera slightly ahead of the artwork on the curve
+    setCurrentProgress(Math.max(0.04, project.pathU - 0.03));
     setIsInLounge(false);
   }, []);
 
   // Jump directly to the Booking Lounge
   const handleJumpToBooking = useCallback(() => {
-    setCurrentZ(-71.0);
+    setCurrentProgress(0.95);
     setIsInLounge(true);
   }, []);
 
@@ -85,54 +85,51 @@ export const App: React.FC = () => {
   // Return to corridor from Lounge
   const handleBackToCorridorFromLounge = useCallback(() => {
     setIsInLounge(false);
-    setCurrentZ(-52.0); // Right before project 08
+    setCurrentProgress(0.85); // Right in front of project 08
   }, []);
 
-  // Find nearest project based on camera Z
+  // Find nearest project based on spline progress u
   const nearestProject: Project | null = useMemo(() => {
-    if (currentZ < -62) return null;
+    if (currentProgress >= 0.92) return null;
     let closest: Project | null = null;
     let minDistance = 999;
     EXHIBITION_PROJECTS.forEach((proj) => {
-      const dist = Math.abs(proj.wallZ - currentZ);
-      if (dist < minDistance && dist < 7.0) {
+      const dist = Math.abs(proj.pathU - currentProgress);
+      if (dist < minDistance && dist < 0.08) {
         minDistance = dist;
         closest = proj;
       }
     });
     return closest;
-  }, [currentZ]);
+  }, [currentProgress]);
 
   const hoveredProject = useMemo(() => {
     return EXHIBITION_PROJECTS.find((p) => p.id === hoveredProjectId) || null;
   }, [hoveredProjectId]);
 
-  // Stepper navigation
+  // Stepper navigation along the curved spline
   const handleNavigateNext = useCallback(() => {
-    // Find next project with wallZ < currentZ
-    const nextProj = EXHIBITION_PROJECTS.find((p) => p.wallZ < currentZ - 2.0);
+    const nextProj = EXHIBITION_PROJECTS.find((p) => p.pathU > currentProgress + 0.035);
     if (nextProj) {
-      setCurrentZ(nextProj.wallZ + 3.5);
+      setCurrentProgress(Math.max(0.04, nextProj.pathU - 0.025));
       setIsInLounge(false);
     } else {
-      // Reached end, enter lounge
-      setCurrentZ(-71.0);
+      setCurrentProgress(0.95);
       setIsInLounge(true);
     }
-  }, [currentZ]);
+  }, [currentProgress]);
 
   const handleNavigatePrev = useCallback(() => {
-    // Find previous project with wallZ > currentZ
     const reversed = [...EXHIBITION_PROJECTS].reverse();
-    const prevProj = reversed.find((p) => p.wallZ > currentZ + 2.0);
+    const prevProj = reversed.find((p) => p.pathU < currentProgress - 0.035);
     if (prevProj) {
-      setCurrentZ(prevProj.wallZ + 3.5);
+      setCurrentProgress(Math.max(0.04, prevProj.pathU - 0.025));
       setIsInLounge(false);
     } else {
-      setCurrentZ(7.5);
+      setCurrentProgress(0.06);
       setIsInLounge(false);
     }
-  }, [currentZ]);
+  }, [currentProgress]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#F3F0E9] font-sans-clean select-none">
@@ -146,10 +143,10 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* 2. SCENE 02: 3D EXHIBITION CORRIDOR CANVAS */}
+      {/* 2. SCENE 02: 3D CURVED EXHIBITION CORRIDOR CANVAS */}
       <ThreeCorridor
-        currentZ={currentZ}
-        onZChange={setCurrentZ}
+        currentProgress={currentProgress}
+        onProgressChange={setCurrentProgress}
         onSelectProject={handleSelectProject}
         activeProject={activeProject}
         isInLounge={isInLounge}
@@ -178,7 +175,7 @@ export const App: React.FC = () => {
       {/* 5. HUD CONTROLS & NAVIGATION */}
       {hasEntered && !activeProject && (
         <GalleryHUD
-          currentZ={currentZ}
+          currentProgress={currentProgress}
           nearestProject={nearestProject}
           onOpenMenu={() => setIsMenuOpen(true)}
           onToggleAudio={handleToggleAudio}
