@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, Volume2, VolumeX, ArrowUpRight, ChevronLeft, ChevronRight, Compass, Play, Pause } from 'lucide-react';
+import { Menu, ArrowUpRight, ChevronLeft, ChevronRight, Compass, Play, Pause } from 'lucide-react';
 import type { Project } from '../types';
 import { InteractionHint } from './InteractionHint';
 
@@ -7,8 +7,6 @@ interface GalleryHUDProps {
   currentProgress: number;
   nearestProject: Project | null;
   onOpenMenu: () => void;
-  onToggleAudio: () => void;
-  isAudioOn: boolean;
   onJumpToBooking: () => void;
   onNavigateNext: () => void;
   onNavigatePrev: () => void;
@@ -22,8 +20,6 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
   currentProgress,
   nearestProject,
   onOpenMenu,
-  onToggleAudio,
-  isAudioOn,
   onJumpToBooking,
   onNavigateNext,
   onNavigatePrev,
@@ -96,19 +92,6 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
                 <Play className="w-3.5 h-3.5 text-[#B89A6A]" />
                 <span className="hidden sm:inline">Auto Walk</span>
               </>
-            )}
-          </button>
-
-          {/* Audio toggle */}
-          <button
-            onClick={onToggleAudio}
-            className="w-10 h-10 rounded-full bg-[#FAF8F5]/85 backdrop-blur-md border border-[#B89A6A]/30 flex items-center justify-center text-[#444444] hover:text-[#222222] hover:border-[#B89A6A] transition-all shadow-sm cursor-pointer"
-            title="Toggle Ambient Gallery Sound"
-          >
-            {isAudioOn ? (
-              <Volume2 className="w-4 h-4 text-[#B89A6A]" />
-            ) : (
-              <VolumeX className="w-4 h-4 text-gray-400" />
             )}
           </button>
 

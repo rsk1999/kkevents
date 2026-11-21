@@ -1,18 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowRight, Volume2, Sparkles, Compass } from 'lucide-react';
+import { ArrowRight, Sparkles, Compass } from 'lucide-react';
 
 interface EntranceScreenProps {
   onEnter: () => void;
   onSkip: () => void;
-  onToggleAudio: () => void;
-  isAudioOn: boolean;
 }
 
 export const EntranceScreen: React.FC<EntranceScreenProps> = ({
   onEnter,
-  onSkip,
-  onToggleAudio,
-  isAudioOn
+  onSkip
 }) => {
   const [stage, setStage] = useState<'initial' | 'textIn' | 'ready'>('initial');
 
@@ -37,15 +33,6 @@ export const EntranceScreen: React.FC<EntranceScreenProps> = ({
         </div>
 
         <div className="flex items-center space-x-4">
-          <button
-            onClick={onToggleAudio}
-            className="flex items-center space-x-2 px-3 py-1.5 rounded-full border border-[#B89A6A]/30 text-xs tracking-wider font-sans-clean text-[#555555] hover:text-[#222222] hover:border-[#B89A6A] transition-all"
-            title="Toggle Ambient Gallery Soundscape"
-          >
-            <Volume2 className={`w-3.5 h-3.5 ${isAudioOn ? 'text-[#B89A6A]' : 'text-gray-400'}`} />
-            <span className="hidden sm:inline">{isAudioOn ? 'Sound On' : 'Ambient Sound'}</span>
-          </button>
-
           <button
             onClick={onSkip}
             className="text-xs tracking-widest uppercase font-sans-clean text-[#777777] hover:text-[#222222] underline underline-offset-4 decoration-[#B89A6A]/40 transition-colors"

@@ -8,7 +8,6 @@ import { GalleryIndexDrawer } from './components/GalleryIndexDrawer';
 import { MobileGalleryFallback } from './components/MobileGalleryFallback';
 import { EXHIBITION_PROJECTS } from './data/projects';
 import type { Project } from './types';
-import { soundscape } from './audio/soundscape';
 
 export const App: React.FC = () => {
   const [hasEntered, setHasEntered] = useState(false);
@@ -17,27 +16,16 @@ export const App: React.FC = () => {
   const [savedReturnProgress, setSavedReturnProgress] = useState(0.04);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [isInLounge, setIsInLounge] = useState(false);
-  const [isAudioOn, setIsAudioOn] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [hoveredProjectId, setHoveredProjectId] = useState<string | null>(null);
   const [isStreamMode, setIsStreamMode] = useState(false);
   const [isAutoTouring, setIsAutoTouring] = useState(false);
 
-  // Toggle ambient audio
-  const handleToggleAudio = useCallback(() => {
-    const playing = soundscape.toggle();
-    setIsAudioOn(playing);
-  }, []);
-
   // Enter the 3D gallery from Scene 01
   const handleEnterExperience = useCallback(() => {
     setHasEntered(true);
     setCurrentProgress(0.07);
-    if (!isAudioOn) {
-      soundscape.play();
-      setIsAudioOn(true);
-    }
-  }, [isAudioOn]);
+  }, []);
 
   const handleSkipIntro = useCallback(() => {
     setHasEntered(true);
@@ -48,7 +36,6 @@ export const App: React.FC = () => {
   const handleSelectProject = useCallback((project: Project) => {
     setSavedReturnProgress(currentProgress);
     setActiveProject(project);
-    soundscape.triggerChime(1.2);
   }, [currentProgress]);
 
   // Return to exact location on curved spline
@@ -138,8 +125,6 @@ export const App: React.FC = () => {
         <EntranceScreen
           onEnter={handleEnterExperience}
           onSkip={handleSkipIntro}
-          onToggleAudio={handleToggleAudio}
-          isAudioOn={isAudioOn}
         />
       )}
 
@@ -178,8 +163,6 @@ export const App: React.FC = () => {
           currentProgress={currentProgress}
           nearestProject={nearestProject}
           onOpenMenu={() => setIsMenuOpen(true)}
-          onToggleAudio={handleToggleAudio}
-          isAudioOn={isAudioOn}
           onJumpToBooking={handleJumpToBooking}
           onNavigateNext={handleNavigateNext}
           onNavigatePrev={handleNavigatePrev}
