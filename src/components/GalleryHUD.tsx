@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, Volume2, VolumeX, ArrowUpRight, ChevronLeft, ChevronRight, Compass } from 'lucide-react';
+import { Menu, Volume2, VolumeX, ArrowUpRight, ChevronLeft, ChevronRight, Compass, Play, Pause } from 'lucide-react';
 import type { Project } from '../types';
 
 interface GalleryHUDProps {
@@ -13,6 +13,8 @@ interface GalleryHUDProps {
   onNavigatePrev: () => void;
   hoveredProject: Project | null;
   isInLounge: boolean;
+  isAutoTouring: boolean;
+  onToggleAutoTour: () => void;
 }
 
 export const GalleryHUD: React.FC<GalleryHUDProps> = ({
@@ -25,7 +27,9 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
   onNavigateNext,
   onNavigatePrev,
   hoveredProject,
-  isInLounge
+  isInLounge,
+  isAutoTouring,
+  onToggleAutoTour
 }) => {
   // Calculate progress percentage (Entrance Z = 8.0 -> Lounge Z = -66.0)
   const startZ = 8.0;
@@ -75,6 +79,29 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center space-x-2 sm:space-x-3">
+          {/* Cinematic Auto-Tour button */}
+          <button
+            onClick={onToggleAutoTour}
+            className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-full border transition-all shadow-sm cursor-pointer text-xs font-sans-clean tracking-wider uppercase ${
+              isAutoTouring
+                ? 'bg-[#B89A6A] text-[#222222] border-[#B89A6A] font-semibold'
+                : 'bg-[#FAF8F5]/85 backdrop-blur-md text-[#555555] border-[#B89A6A]/30 hover:border-[#B89A6A]'
+            }`}
+            title="Sit back and enjoy the automated cinematic gallery tour"
+          >
+            {isAutoTouring ? (
+              <>
+                <Pause className="w-3.5 h-3.5 text-[#222222]" />
+                <span className="hidden sm:inline">Pause Tour</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5 text-[#B89A6A]" />
+                <span className="hidden sm:inline">Auto Walk</span>
+              </>
+            )}
+          </button>
+
           {/* Audio toggle */}
           <button
             onClick={onToggleAudio}
@@ -144,11 +171,11 @@ export const GalleryHUD: React.FC<GalleryHUDProps> = ({
           </span>
         </div>
 
-        {/* Scroll To Move Helper */}
+        {/* Scroll & Drag Helper */}
         <div className="hidden lg:flex items-center space-x-2 text-xs font-sans-clean text-[#666666] bg-[#FAF8F5]/80 backdrop-blur-md px-4 py-2 rounded-full border border-[#B89A6A]/20">
           <Compass className="w-3.5 h-3.5 text-[#B89A6A] animate-spin" style={{ animationDuration: '8s' }} />
           <span className="uppercase tracking-widest text-[11px]">
-            Scroll or swipe to walk corridor · Click artwork to open
+            Scroll mouse or drag to glide corridor · Click artwork to open
           </span>
         </div>
 

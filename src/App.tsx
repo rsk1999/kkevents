@@ -20,6 +20,7 @@ export const App: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [hoveredProjectId, setHoveredProjectId] = useState<string | null>(null);
   const [isStreamMode, setIsStreamMode] = useState(false);
+  const [isAutoTouring, setIsAutoTouring] = useState(false);
 
   // Toggle ambient audio
   const handleToggleAudio = useCallback(() => {
@@ -150,6 +151,7 @@ export const App: React.FC = () => {
         onEnterLounge={() => setIsInLounge(true)}
         hoveredProjectId={hoveredProjectId}
         onHoverProject={setHoveredProjectId}
+        isAutoTouring={isAutoTouring}
       />
 
       {/* 3. SCENE 04: THE BOOKING LOUNGE OVERLAY (When in Lounge) */}
@@ -181,6 +183,8 @@ export const App: React.FC = () => {
           onNavigatePrev={handleNavigatePrev}
           hoveredProject={hoveredProject}
           isInLounge={isInLounge}
+          isAutoTouring={isAutoTouring}
+          onToggleAutoTour={() => setIsAutoTouring(!isAutoTouring)}
         />
       )}
 
