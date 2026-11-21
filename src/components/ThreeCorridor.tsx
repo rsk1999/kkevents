@@ -555,11 +555,15 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
     // --- 11. LUXURY 60-120 FPS CINEMATIC RENDER & PHYSICS LOOP ---
     let animationId: number;
-    const clock = new THREE.Clock();
+    let lastTime = performance.now();
+    let elapsedTime = 0;
 
-    const animate = () => {
+    const animate = (timestamp: number) => {
       animationId = requestAnimationFrame(animate);
-      const delta = Math.min(clock.getDelta(), 0.06);
+      const now = timestamp || performance.now();
+      const delta = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+      elapsedTime += delta;
 
       // Auto-Tour glide if active
       if (isAutoTouring && !activeProject && !isDraggingRef.current) {
@@ -599,7 +603,6 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       }
 
       // Throttle React State Updates to keep main thread completely unblocked
-      const now = performance.now();
       const zDiff = Math.abs(currentZRef.current - lastReportedZRef.current);
       if (zDiff > 0.16 && now - lastReportTimeRef.current > 45) {
         lastReportedZRef.current = currentZRef.current;
@@ -620,7 +623,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
       // Subtle atmospheric dust animation
       const pPositions = particleGeo.attributes.position.array as Float32Array;
-      const time = clock.getElapsedTime() * 0.3;
+      const time = elapsedTime * 0.3;
       for (let i = 0; i < particleCount; i++) {
         const i3 = i * 3;
         pPositions[i3 + 1] += Math.sin(time + i) * 0.001; // subtle float
@@ -664,7 +667,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       renderer.render(scene, camera);
     };
 
-    animate();
+    animate(performance.now());
 
     return () => {
       cancelAnimationFrame(animationId);
