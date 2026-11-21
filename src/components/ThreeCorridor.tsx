@@ -251,23 +251,30 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       const frameDepth = 0.08;
 
       // Outer Bevel Frame (Champagne Gold)
-      const frameGeo = new THREE.BoxGeometry(w + 0.14, h + 0.14, frameDepth);
+      const frameGeo = new THREE.BoxGeometry(w + 0.16, h + 0.16, frameDepth);
       const frameMat = new THREE.MeshStandardMaterial({
         color: '#B89A6A',
-        metalness: 0.8,
+        metalness: 0.85,
         roughness: 0.25
       });
       const frameMesh = new THREE.Mesh(frameGeo, frameMat);
       group.add(frameMesh);
 
-      // Artwork Plane
+      // Dark Inner Matte Reveal Border
+      const innerMatGeo = new THREE.PlaneGeometry(w + 0.04, h + 0.04, 1, 1);
+      const innerMat = new THREE.MeshBasicMaterial({ color: '#141414' });
+      const innerMatMesh = new THREE.Mesh(innerMatGeo, innerMat);
+      innerMatMesh.position.z = frameDepth / 2 + 0.005;
+      group.add(innerMatMesh);
+
+      // Artwork Plane (Mounted inside the frame on the wall)
       const artGeo = new THREE.PlaneGeometry(w, h, 1, 1);
       const fallbackTexture = createFallbackArtworkTexture(project);
       const artMat = new THREE.MeshBasicMaterial({
         map: fallbackTexture
       });
       const artMesh = new THREE.Mesh(artGeo, artMat);
-      artMesh.position.z = frameDepth / 2 + 0.01;
+      artMesh.position.z = frameDepth / 2 + 0.015;
       artMesh.userData = { projectId: project.id, isArtwork: true, project };
       group.add(artMesh);
       interactiveMeshes.push(artMesh);
@@ -295,18 +302,22 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
         transparent: true
       });
       const placardMesh = new THREE.Mesh(placardGeo, placardMat);
-      placardMesh.position.set(0, -(h / 2 + 0.45), 0.01);
+      placardMesh.position.set(0, -(h / 2 + 0.42), frameDepth / 2 + 0.01);
       placardMesh.userData = { projectId: project.id, isArtwork: true, project };
       group.add(placardMesh);
       interactiveMeshes.push(placardMesh);
 
-      // Dedicated Focused Ceiling Spotlight
-      const spotLight = new THREE.SpotLight('#FFF5E4', 3.8, 12, Math.PI / 4.5, 0.4, 1.0);
+      // Dedicated Focused Ceiling Spotlight with standalone target
+      const spotLight = new THREE.SpotLight('#FFF5E4', 3.5, 14, Math.PI / 4.5, 0.45, 1.0);
       const trackX = isLeft ? -2.4 : 2.4;
       spotLight.position.set(trackX, CORRIDOR_CONFIG.height - 0.2, project.wallZ);
-      spotLight.target = artMesh;
+
+      // Separate target object to avoid re-parenting artMesh away from group!
+      const spotTarget = new THREE.Object3D();
+      spotTarget.position.set(wallX, CORRIDOR_CONFIG.eyeHeight + 0.3, project.wallZ);
+      scene.add(spotTarget);
+      spotLight.target = spotTarget;
       scene.add(spotLight);
-      scene.add(spotLight.target);
 
       // Ceiling fixture marker
       const fixtureGeo = new THREE.CylinderGeometry(0.08, 0.1, 0.2, 8);
