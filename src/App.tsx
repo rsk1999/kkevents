@@ -77,6 +77,11 @@ export const App: React.FC = () => {
     setIsInLounge(true);
   }, []);
 
+  // Enter Lounge
+  const handleEnterLounge = useCallback(() => {
+    setIsInLounge(true);
+  }, []);
+
   // Return to corridor from Lounge
   const handleBackToCorridorFromLounge = useCallback(() => {
     setIsInLounge(false);
@@ -148,7 +153,7 @@ export const App: React.FC = () => {
         onSelectProject={handleSelectProject}
         activeProject={activeProject}
         isInLounge={isInLounge}
-        onEnterLounge={() => setIsInLounge(true)}
+        onEnterLounge={handleEnterLounge}
         hoveredProjectId={hoveredProjectId}
         onHoverProject={setHoveredProjectId}
         isAutoTouring={isAutoTouring}

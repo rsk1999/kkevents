@@ -26,6 +26,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   onZChange,
   onSelectProject,
   activeProject,
+  isInLounge,
   onEnterLounge,
   onHoverProject,
   isAutoTouring = false
@@ -47,10 +48,34 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   const hoveredMeshRef = useRef<THREE.Group | null>(null);
   const needsRaycastRef = useRef<boolean>(true);
 
-  // Sync external position jumps
+  // Prop Callbacks in Refs (to avoid re-triggering Three.js canvas mount)
+  const onZChangeRef = useRef(onZChange);
+  onZChangeRef.current = onZChange;
+
+  const onSelectProjectRef = useRef(onSelectProject);
+  onSelectProjectRef.current = onSelectProject;
+
+  const onEnterLoungeRef = useRef(onEnterLounge);
+  onEnterLoungeRef.current = onEnterLounge;
+
+  const onHoverProjectRef = useRef(onHoverProject);
+  onHoverProjectRef.current = onHoverProject;
+
+  const activeProjectRef = useRef(activeProject);
+  activeProjectRef.current = activeProject;
+
+  const isInLoungeRef = useRef(isInLounge);
+  isInLoungeRef.current = isInLounge;
+
+  const isAutoTouringRef = useRef(isAutoTouring);
+  isAutoTouringRef.current = isAutoTouring;
+
+  // Sync external position jumps (e.g. menu jump or return to corridor)
   useEffect(() => {
-    targetZRef.current = currentZ;
-    velocityZRef.current = 0;
+    if (Math.abs(targetZRef.current - currentZ) > 0.4) {
+      targetZRef.current = currentZ;
+      velocityZRef.current = 0;
+    }
   }, [currentZ]);
 
   useEffect(() => {
@@ -470,7 +495,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       needsRaycastRef.current = true;
 
       // Handle Drag Navigation
-      if (isDraggingRef.current && !activeProject) {
+      if (isDraggingRef.current && !activeProjectRef.current) {
         const deltaDragY = e.clientY - dragStartYRef.current;
         dragStartYRef.current = e.clientY;
         velocityZRef.current -= deltaDragY * 0.025;
@@ -478,7 +503,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const onMouseDown = (e: MouseEvent) => {
-      if (activeProject) return;
+      if (activeProjectRef.current) return;
       isDraggingRef.current = true;
       dragStartYRef.current = e.clientY;
     };
@@ -496,7 +521,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       if (intersects.length > 0) {
         const hit = intersects[0].object;
         if (hit.userData && hit.userData.project) {
-          onSelectProject(hit.userData.project);
+          onSelectProjectRef.current(hit.userData.project);
         }
       }
     };
@@ -508,7 +533,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
     // --- 10. FLUID INERTIA MOMENTUM SCROLL ENGINE ---
     const onWheel = (e: WheelEvent) => {
-      if (activeProject) return;
+      if (activeProjectRef.current) return;
       e.preventDefault();
 
       // Normalize wheel delta across varying mice & trackpads
@@ -520,7 +545,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (activeProject) return;
+      if (activeProjectRef.current) return;
       if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S' || e.key === 'PageDown') {
         velocityZRef.current -= 0.22;
       } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === 'PageUp') {
@@ -533,7 +558,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       touchStartY = e.touches[0].clientY;
     };
     const onTouchMove = (e: TouchEvent) => {
-      if (activeProject) return;
+      if (activeProjectRef.current) return;
       const touchY = e.touches[0].clientY;
       const deltaY = touchStartY - touchY;
       touchStartY = touchY;
@@ -566,7 +591,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       elapsedTime += delta;
 
       // Auto-Tour glide if active
-      if (isAutoTouring && !activeProject && !isDraggingRef.current) {
+      if (isAutoTouringRef.current && !activeProjectRef.current && !isDraggingRef.current) {
         if (targetZRef.current > CORRIDOR_CONFIG.minScroll + 3.0) {
           velocityZRef.current -= 0.008;
         }
@@ -598,8 +623,8 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       mousePosRef.current.y += (targetMouseRef.current.y - mousePosRef.current.y) * mouseFactor;
 
       // Check Lounge Transition
-      if (currentZRef.current <= -63) {
-        onEnterLounge();
+      if (currentZRef.current <= -63 && !isInLoungeRef.current) {
+        onEnterLoungeRef.current();
       }
 
       // Throttle React State Updates to keep main thread completely unblocked
@@ -607,7 +632,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       if (zDiff > 0.16 && now - lastReportTimeRef.current > 45) {
         lastReportedZRef.current = currentZRef.current;
         lastReportTimeRef.current = now;
-        onZChange(currentZRef.current);
+        onZChangeRef.current(currentZRef.current);
       }
 
       // Steadycam Camera Positioning (Smooth glide without jitter)
@@ -643,14 +668,14 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
           const hit = intersects[0].object;
           const project = hit.userData.project as Project | undefined;
           if (project) {
-            onHoverProject(project.id);
+            onHoverProjectRef.current(project.id);
             const parentGroup = hit.parent as THREE.Group;
             if (parentGroup && parentGroup.userData.originalX !== undefined) {
               hoveredMeshRef.current = parentGroup;
             }
           }
         } else {
-          onHoverProject(null);
+          onHoverProjectRef.current(null);
           hoveredMeshRef.current = null;
         }
       }
@@ -686,7 +711,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       }
       renderer.dispose();
     };
-  }, [onZChange, onSelectProject, onEnterLounge, onHoverProject, activeProject, isAutoTouring]);
+  }, []);
 
   return (
     <div
