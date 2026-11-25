@@ -174,32 +174,7 @@ export const App: React.FC = () => {
         isAutoTouring={isAutoTouring}
       />
 
-      {/* 3. STEP 1: PREVIEW PANEL (When a frame is selected, before full modal) */}
-      {selectedProject && !activeProject && !isInLounge && (
-        <ProjectPreviewPanel
-          project={selectedProject}
-          onViewProject={handleViewProjectFromPreview}
-          onClose={handleClosePreview}
-        />
-      )}
-
-      {/* 4. SCENE 04: THE BOOKING LOUNGE OVERLAY (When in Lounge) */}
-      {isInLounge && hasEntered && !activeProject && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-[#F3F0E9]/95 backdrop-blur-md transition-all duration-700 animate-fadeIn pointer-events-auto">
-          <BookingLoungeOverlay onBackToCorridor={handleBackToCorridorFromLounge} />
-        </div>
-      )}
-
-      {/* 5. SCENE 03: PROJECT DETAIL VIEW MODAL (Step 2: Full View) */}
-      {activeProject && (
-        <ProjectDetailModal
-          project={activeProject}
-          onClose={handleCloseProject}
-          onPlanEvent={handlePlanFromProject}
-        />
-      )}
-
-      {/* 6. HUD CONTROLS & NAVIGATION (Active only during corridor exploration) */}
+      {/* 3. HUD CONTROLS & NAVIGATION (Active only during corridor exploration) */}
       {hasEntered && !activeProject && !isInLounge && (
         <GalleryHUD
           currentProgress={currentProgress}
@@ -212,6 +187,31 @@ export const App: React.FC = () => {
           isInLounge={isInLounge}
           isAutoTouring={isAutoTouring}
           onToggleAutoTour={() => setIsAutoTouring(!isAutoTouring)}
+        />
+      )}
+
+      {/* 4. STEP 1: PREVIEW PANEL (When a frame is selected, displayed prominently above HUD) */}
+      {selectedProject && !activeProject && !isInLounge && (
+        <ProjectPreviewPanel
+          project={selectedProject}
+          onViewProject={handleViewProjectFromPreview}
+          onClose={handleClosePreview}
+        />
+      )}
+
+      {/* 5. SCENE 04: THE BOOKING LOUNGE OVERLAY (When in Lounge) */}
+      {isInLounge && hasEntered && !activeProject && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-[#F3F0E9]/95 backdrop-blur-md transition-all duration-700 animate-fadeIn pointer-events-auto">
+          <BookingLoungeOverlay onBackToCorridor={handleBackToCorridorFromLounge} />
+        </div>
+      )}
+
+      {/* 6. SCENE 03: PROJECT DETAIL VIEW MODAL (Step 2: Full View) */}
+      {activeProject && (
+        <ProjectDetailModal
+          project={activeProject}
+          onClose={handleCloseProject}
+          onPlanEvent={handlePlanFromProject}
         />
       )}
 

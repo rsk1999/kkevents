@@ -26,8 +26,12 @@ export const ProjectPreviewPanel: React.FC<ProjectPreviewPanelProps> = ({
 
   return (
     <div
-      className="pointer-events-auto fixed inset-x-4 bottom-20 sm:bottom-24 md:bottom-28 z-40 max-w-2xl mx-auto animate-fadeIn"
+      className="pointer-events-auto fixed inset-x-4 bottom-20 sm:bottom-24 md:bottom-28 z-50 max-w-2xl mx-auto animate-fadeIn select-auto"
       onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchEnd={(e) => e.stopPropagation()}
     >
       <div className="relative bg-[#161514]/95 backdrop-blur-2xl border border-[#B89A6A]/45 rounded-2xl shadow-2xl overflow-hidden p-4 sm:p-6 text-white transition-all">
         {/* Top Accent Gold Line */}
@@ -35,7 +39,14 @@ export const ProjectPreviewPanel: React.FC<ProjectPreviewPanelProps> = ({
 
         {/* Close Button */}
         <button
-          onClick={onClose}
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
           className="absolute top-3 right-3 sm:top-4 sm:right-4 w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/15 transition-all cursor-pointer"
           title="Close preview (Esc)"
         >
@@ -91,15 +102,29 @@ export const ProjectPreviewPanel: React.FC<ProjectPreviewPanelProps> = ({
             {/* Action Buttons */}
             <div className="flex items-center space-x-3 pt-2 border-t border-white/10">
               <button
-                onClick={() => onViewProject(project)}
-                className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-2.5 rounded-full bg-[#B89A6A] hover:bg-[#A38657] text-[#161514] font-bold text-xs uppercase font-sans-clean tracking-[0.16em] transition-all shadow-md cursor-pointer hover:shadow-[#B89A6A]/20"
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onViewProject(project);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-2.5 rounded-full bg-[#B89A6A] hover:bg-[#A38657] text-[#161514] font-bold text-xs uppercase font-sans-clean tracking-[0.16em] transition-all shadow-md cursor-pointer hover:shadow-[#B89A6A]/20 active:scale-95"
               >
                 <span>VIEW PROJECT</span>
                 <ArrowUpRight className="w-4 h-4 text-[#161514]" />
               </button>
 
               <button
-                onClick={onClose}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onClose();
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
                 className="px-4 py-2.5 rounded-full border border-white/20 text-white/70 hover:text-white hover:border-white/40 text-xs uppercase font-sans-clean tracking-wider transition-all cursor-pointer"
               >
                 CLOSE

@@ -595,6 +595,8 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       if (activeProjectRef.current || isInLoungeRef.current) return;
       // ONLY respond to Left Mouse Button (button 0) for camera looking & frame interaction
       if (e.pointerType === 'mouse' && e.button !== 0) return;
+      // CRITICAL: Ignore pointerdown if the user clicked on an HTML UI overlay (Preview Panel, buttons, HUD)
+      if (e.target !== renderer.domElement) return;
 
       if (e.pointerType !== 'touch') {
         isDraggingRef.current = true;
@@ -685,9 +687,15 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     let touchStartX = 0;
     let touchStartTime = 0;
     let touchTotalDist = 0;
+    let isTouchOnCanvas = false;
 
     const onTouchStart = (e: TouchEvent) => {
       if (activeProjectRef.current || isInLoungeRef.current) return;
+      if (e.target !== renderer.domElement) {
+        isTouchOnCanvas = false;
+        return;
+      }
+      isTouchOnCanvas = true;
       if (e.touches.length > 0) {
         touchStartY = e.touches[0].clientY;
         touchStartX = e.touches[0].clientX;
@@ -697,7 +705,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (activeProjectRef.current || isInLoungeRef.current || e.touches.length === 0) return;
+      if (!isTouchOnCanvas || activeProjectRef.current || isInLoungeRef.current || e.touches.length === 0) return;
       const touchX = e.touches[0].clientX;
       const touchY = e.touches[0].clientY;
       const deltaX = touchStartX - touchX;
@@ -720,7 +728,11 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
     };
 
     const onTouchEnd = () => {
-      if (activeProjectRef.current || isInLoungeRef.current) return;
+      if (!isTouchOnCanvas || activeProjectRef.current || isInLoungeRef.current) {
+        isTouchOnCanvas = false;
+        return;
+      }
+      isTouchOnCanvas = false;
       const touchDuration = performance.now() - touchStartTime;
       // ONLY trigger tap if user touched cleanly without swiping (< 8px movement and < 350ms)
       if (touchTotalDist < 8 && touchDuration < 350) {
