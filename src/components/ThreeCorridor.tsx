@@ -68,6 +68,9 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   const lookPitchRef = useRef<number>(0);
   const targetPitchRef = useRef<number>(0);
   const currentLookFocusRef = useRef<THREE.Vector3 | null>(null);
+  const activeLookDirRef = useRef<THREE.Vector3 | null>(null);
+  const isFocusingFrameRef = useRef<boolean>(false);
+  const lastSyncedPropURef = useRef<number>(currentProgress);
 
   // Prop Callbacks in Refs
   const onProgressChangeRef = useRef(onProgressChange);
@@ -97,11 +100,14 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
   const isAutoTouringRef = useRef(isAutoTouring);
   isAutoTouringRef.current = isAutoTouring;
 
-  // Sync external position jumps (Directory jump or return to exhibition)
+  // Sync external position jumps ONLY (Directory jump, Lounge jump, or modal close)
+  // Internal scrolling never self-triggers or cancels velocity.
   useEffect(() => {
-    if (Math.abs(targetURef.current - currentProgress) > 0.03) {
+    if (Math.abs(currentProgress - lastSyncedPropURef.current) > 0.015) {
       targetURef.current = currentProgress;
+      currentURef.current = currentProgress;
       velocityURef.current = 0;
+      lastSyncedPropURef.current = currentProgress;
     }
   }, [currentProgress]);
 
@@ -128,6 +134,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       .add(initialFrame.tangent.clone().multiplyScalar(8.0))
       .add(new THREE.Vector3(0, CURVED_CONFIG.eyeHeight, 0));
     camera.lookAt(initialLook);
+    activeLookDirRef.current = initialFrame.tangent.clone();
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -649,10 +656,10 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       e.preventDefault();
 
       const rawDelta = e.deltaY;
-      const normalized = Math.sign(rawDelta) * Math.min(Math.abs(rawDelta), 55);
+      const normalized = Math.sign(rawDelta) * Math.min(Math.abs(rawDelta), 85);
 
       // Add to physical velocity accumulator along parameter u
-      velocityURef.current += normalized * 0.000048;
+      velocityURef.current += normalized * 0.000045;
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -754,7 +761,7 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       }
 
       // Physics Friction / Decay along the curve
-      const friction = Math.pow(0.86, delta * 60);
+      const friction = Math.pow(0.88, delta * 60);
       velocityURef.current *= friction;
 
       // Update target along u
@@ -770,16 +777,22 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
       }
 
       // Smooth Parameter U Lerp
-      const lerpFactor = 1.0 - Math.exp(-9.0 * delta);
+      const lerpFactor = 1.0 - Math.exp(-8.5 * delta);
       currentURef.current += (targetURef.current - currentURef.current) * lerpFactor;
 
+      // When actively walking (moving along the curve) and user is NOT holding mouse to drag:
+      // gently guide the look direction back along the corridor centerline so visitor doesn't walk into walls
+      const isWalking = Math.abs(velocityURef.current) > 0.00003 || Math.abs(targetURef.current - currentURef.current) > 0.0005;
+      if (isWalking && !isDraggingRef.current && !selectedProjectIdRef.current) {
+        const returnFactor = Math.pow(0.93, delta * 60);
+        targetYawRef.current *= returnFactor;
+        targetPitchRef.current *= returnFactor;
+      }
+
       // Smooth camera look damping (yaw & pitch)
-      const lookFactor = 1.0 - Math.exp(-9.0 * delta);
+      const lookFactor = 1.0 - Math.exp(-10.0 * delta);
       lookYawRef.current += (targetYawRef.current - lookYawRef.current) * lookFactor;
       lookPitchRef.current += (targetPitchRef.current - lookPitchRef.current) * lookFactor;
-
-      // Note: We DO NOT auto-decay yaw toward center on mouse release.
-      // The current viewing direction is strictly preserved where the user leaves it.
 
       // Check Lounge Transition
       if (currentURef.current >= CURVED_CONFIG.loungeU && !isInLoungeRef.current) {
@@ -788,49 +801,65 @@ export const ThreeCorridor: React.FC<ThreeCorridorProps> = ({
 
       // Throttle React State Updates to keep main thread completely unblocked
       const uDiff = Math.abs(currentURef.current - lastReportedURef.current);
-      if (uDiff > 0.005 && now - lastReportTimeRef.current > 45) {
+      if (uDiff > 0.004 && now - lastReportTimeRef.current > 40) {
         lastReportedURef.current = currentURef.current;
+        lastSyncedPropURef.current = currentURef.current;
         lastReportTimeRef.current = now;
         onProgressChangeRef.current(currentURef.current);
       }
 
       // --- CALCULATE CAMERA POSITION & ORIENTATION ON CURVE ---
-      // Camera position on curved spline (no passive lateral mouse sway)
+      // Camera position stays precisely on the center path of the curved corridor
       const curFrame = getPathFrame(currentURef.current);
       const camPos = curFrame.point.clone().add(new THREE.Vector3(0, CURVED_CONFIG.eyeHeight, 0));
       camera.position.copy(camPos);
 
-      // Natural Look-Ahead along the curve bend
-      const lookAheadU = Math.min(0.9999, currentURef.current + 0.055);
-      const lookFrame = getPathFrame(lookAheadU);
-      const forwardDir = lookFrame.point.clone().sub(curFrame.point).normalize();
+      // Smooth forward corridor direction based strictly on the path tangents
+      // (Samples current tangent and gentle look-ahead tangent so orientation always follows the curve center)
+      const lookAheadU = Math.min(0.9999, currentURef.current + 0.028);
+      const aheadTangent = getPathFrame(lookAheadU).tangent;
+      const forwardTangent = curFrame.tangent.clone().lerp(aheadTangent, 0.45).normalize();
 
-      // Rotate forward look direction around world Y strictly by active lookYawRef
-      const rotatedLookDir = forwardDir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), lookYawRef.current);
+      // Apply user's click-and-drag look offsets
+      const lookDir = forwardTangent.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), lookYawRef.current);
+      const pitchAxis = new THREE.Vector3(0, 1, 0).cross(lookDir).normalize();
+      lookDir.applyAxisAngle(pitchAxis, lookPitchRef.current);
 
-      // Calculate normal look target ahead of camera along the curve bend
-      const defaultLookTarget = camPos.clone().add(rotatedLookDir.multiplyScalar(4.5));
-      defaultLookTarget.y += lookPitchRef.current * 2.2;
-
-      if (!currentLookFocusRef.current) {
-        currentLookFocusRef.current = defaultLookTarget.clone();
+      // Smooth direction vector damping (never lags in world coordinates)
+      if (!activeLookDirRef.current) {
+        activeLookDirRef.current = lookDir.clone();
+      } else {
+        activeLookDirRef.current.lerp(lookDir, 1.0 - Math.exp(-12.0 * delta)).normalize();
       }
+
+      const naturalLookTarget = camPos.clone().add(activeLookDirRef.current.clone().multiplyScalar(8.0));
 
       if (selectedProjectIdRef.current) {
         const selEntry = projectMap.get(selectedProjectIdRef.current);
         if (selEntry) {
-          // Frame target centered at the artwork
+          // Focus camera smoothly toward the selected artwork frame
           const frameTarget = selEntry.originalPos.clone();
           frameTarget.y = CURVED_CONFIG.eyeHeight * 0.98;
-          // Smooth focus toward the selected frame
-          currentLookFocusRef.current.lerp(frameTarget, 1.0 - Math.exp(-6.0 * delta));
+          if (!currentLookFocusRef.current) {
+            currentLookFocusRef.current = naturalLookTarget.clone();
+          }
+          currentLookFocusRef.current.lerp(frameTarget, 1.0 - Math.exp(-7.0 * delta));
           camera.lookAt(currentLookFocusRef.current);
+          isFocusingFrameRef.current = true;
         } else {
-          camera.lookAt(defaultLookTarget);
+          camera.lookAt(naturalLookTarget);
         }
       } else {
-        currentLookFocusRef.current.lerp(defaultLookTarget, 1.0 - Math.exp(-7.0 * delta));
-        camera.lookAt(currentLookFocusRef.current);
+        if (isFocusingFrameRef.current && currentLookFocusRef.current) {
+          currentLookFocusRef.current.lerp(naturalLookTarget, 1.0 - Math.exp(-8.0 * delta));
+          camera.lookAt(currentLookFocusRef.current);
+          if (currentLookFocusRef.current.distanceTo(naturalLookTarget) < 0.1) {
+            isFocusingFrameRef.current = false;
+            currentLookFocusRef.current = null;
+          }
+        } else {
+          camera.lookAt(naturalLookTarget);
+        }
       }
 
       // Floating dust particles animation

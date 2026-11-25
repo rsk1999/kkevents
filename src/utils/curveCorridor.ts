@@ -13,8 +13,8 @@ export const CORRIDOR_CURVE_POINTS = [
   new THREE.Vector3(-14.2, 0, -52.0), // P4: Apex of left curve
   new THREE.Vector3(-7.5, 0, -72.0),  // P5: Flowing S-curve inflection
   new THREE.Vector3(4.5, 0, -92.0),   // P6: Sweeping gentle counter-curve to the right
-  new THREE.Vector3(9.5, 0, -110.0),  // P7: Straightening toward the lounge
-  new THREE.Vector3(8.5, 0, -126.0)   // P8: Grand Booking Lounge Pavilion Center
+  new THREE.Vector3(8.0, 0, -110.0),  // P7: Straightening toward the lounge
+  new THREE.Vector3(8.0, 0, -128.0)   // P8: Grand Booking Lounge Pavilion Center
 ];
 
 export const corridorSpline = new THREE.CatmullRomCurve3(
